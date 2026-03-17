@@ -1,0 +1,11 @@
+{
+  "android": {
+    "release": {
+      "keystore": "release.keystore",
+      "alias": "cordova-app",
+      "storePassword": "by940808",
+      "password": "by940808",
+      "keystoreType": "jks"
+    }
+  }
+}

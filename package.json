@@ -1,0 +1,34 @@
+{
+  "name": "com.moretime2023.rougelike",
+  "displayName": "HelloWorld",
+  "version": "2.0.2",
+  "description": "A sample Apache Cordova application that responds to the deviceready event.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "cordova run browser",
+    "test": "cordova run android",
+    "build": "cordova build android --release -- --packageType=apk",
+    "bin": "tsx bin/index.ts"
+  },
+  "keywords": [
+    "ecosystem:cordova"
+  ],
+  "author": "Apache Cordova Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "consola": "^3.2.3",
+    "cordova-android": "^15.0.0",
+    "cordova-browser": "^7.0.0",
+    "cordova-plugin-statusbar": "^4.0.0",
+    "tsx": "^4.19.2"
+  },
+  "cordova": {
+    "platforms": [
+      "android",
+      "browser"
+    ],
+    "plugins": {
+      "cordova-plugin-statusbar": {}
+    }
+  }
+}
