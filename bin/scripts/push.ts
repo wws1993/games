@@ -32,8 +32,6 @@ export const description = '索要提交类型与 msg、修改版本号后 git p
 
 export async function run(): Promise<void> {
   const pkgPath = join(ROOT, 'package.json');
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  const currentVersion = pkg.version as string;
 
   const commitType = await consola.prompt('选择提交类型', {
     type: 'select',
@@ -60,19 +58,34 @@ export async function run(): Promise<void> {
     options: [...VERSION_BUMP_TYPES],
   });
 
-  let newVersion = currentVersion;
-  if (bumpType && bumpType !== 'none') {
-    newVersion = bumpVersion(currentVersion, bumpType as 'major' | 'minor' | 'patch');
-    syncVersion(newVersion);
-    consola.success(`版本号已更新: ${currentVersion} → ${newVersion}`);
-  }
-
   const commitMsg = `${commitType}: ${msg.trim()}`;
 
   try {
+    /** pull --rebase 要求工作区干净，有未暂存更改时先 stash */
+    const statusResult = execSync('git status --porcelain', { cwd: ROOT, encoding: 'utf-8' });
+    const hasChanges = statusResult.trim().length > 0;
+    if (hasChanges) {
+      consola.info('暂存本地修改...');
+      spawnSync('git', ['stash', 'push', '-u', '-m', 'push-script-temp'], { cwd: ROOT, stdio: 'inherit' });
+    }
     consola.info('拉取远程最新代码...');
     const pullResult = spawnSync('git', ['pull', '--rebase'], { cwd: ROOT, stdio: 'inherit' });
-    if (pullResult.status !== 0) throw new Error('git pull 失败，请先解决冲突或检查网络');
+    if (pullResult.status !== 0) {
+      if (hasChanges) spawnSync('git', ['stash', 'pop'], { cwd: ROOT, stdio: 'inherit' });
+      throw new Error('git pull 失败，请先解决冲突或检查网络');
+    }
+    if (hasChanges) {
+      consola.info('恢复本地修改...');
+      const popResult = spawnSync('git', ['stash', 'pop'], { cwd: ROOT, stdio: 'inherit' });
+      if (popResult.status !== 0) throw new Error('stash pop 失败，请手动执行 git stash pop');
+    }
+    const pkgAfterPull = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    const versionToBump = pkgAfterPull.version as string;
+    if (bumpType && bumpType !== 'none') {
+      const newVersion = bumpVersion(versionToBump, bumpType as 'major' | 'minor' | 'patch');
+      syncVersion(newVersion);
+      consola.success(`版本号已更新: ${versionToBump} → ${newVersion}`);
+    }
     execSync('git add -A', { cwd: ROOT, stdio: 'inherit' });
     const commitResult = spawnSync('git', ['commit', '-m', commitMsg], { cwd: ROOT, stdio: 'inherit' });
     if (commitResult.status !== 0) throw new Error('git commit 失败');

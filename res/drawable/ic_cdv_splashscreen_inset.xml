@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 启动屏图标使用圆形遮罩(直径 192dp)，宽幅 logo 会被裁剪。通过 inset 添加边距使 logo 完整显示在可见区域内。288dp 画布，左右各 72dp 使可见区 144dp 宽，上下各 48dp 使可见区 192dp 高，确保宽幅 moretime logo 完整显示 -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_cdv_splashscreen"
+    android:insetLeft="10dp"
+    android:insetRight="10dp"
+    android:insetTop="10dp"
+    android:insetBottom="10dp"
+/>
