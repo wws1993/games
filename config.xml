@@ -14,11 +14,12 @@
 
     <platform name="android">
         <hook type="after_prepare" src="res/scripts/android_splash_inset.js" />
-        <preference name="AndroidWindowSplashScreenBackground" value="#101010" />
+        <preference name="AndroidWindowSplashScreenBackground" value="#fff" />
         <preference name="AndroidWindowSplashScreenAnimatedIcon" value="res/logo.png" />
         <preference name="AndroidWindowSplashScreenAnimationDuration" value="400" />
         <preference name="SplashScreenDelay" value="1500" />
-        <preference name="FadeSplashScreen" value="true" />
-        <preference name="FadeSplashScreenDuration" value="500" />
+        <preference name="FadeSplashScreen" value="false" />
+        <preference name="FadeSplashScreenDuration" value="900000" />
+        <preference name="ShowSplashScreen" value="false" />
     </platform>
 </widget>

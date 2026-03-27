@@ -1,7 +1,7 @@
 {
   "name": "com.moretime2023.rougelike",
   "displayName": "安卓游戏脚手架",
-  "version": "3.0.0",
+  "version": "3.0.202",
   "description": "A sample Apache Cordova application that responds to the deviceready event.",
   "main": "index.js",
   "scripts": {
@@ -45,5 +45,6 @@
     "plugins": {
       "cordova-plugin-statusbar": {}
     }
-  }
+  },
+  "lastModify": "2026-03-28 00:00:49"
 }
