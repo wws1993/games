@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.moretime2023.rougelike" version="3.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
-    <name>拼图游戏</name>
-    <description>一款单机拼图游戏</description>
+<widget id="com.moretime2023.rougelike" version="3.2.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>敌后幸存者</name>
+    <description>是兄弟，就来砍鬼子</description>
     <author email="moretime_2023@163.com" href="moretime_2023@163.com">moretime_2023@163.com</author>
     <content src="index.html" />
     <allow-intent href="http://*/*" />
@@ -14,6 +14,19 @@
 
     <platform name="android">
         <hook type="after_prepare" src="res/scripts/android_splash_inset.js" />
+        <!-- 将背景色资源拷入 Android 工程，供 adaptive icon 的 background 引用 -->
+        <resource-file src="res/values/cdv_icon_colors.xml" target="/app/src/main/res/values/cdv_icon_colors.xml" />
+        <!--
+            Android 8+ 自适应图标 = 背景层 + 前景层；单张 src 时前景常被缩小居中，易看起来像「白边方块」。
+            下面为各 density 显式指定 background（纯色）+ foreground（你的主图），src 作为旧机/回退图标。
+            前景图本身请尽量铺满画布、去掉四边留白；主体宜略偏大，因圆形裁切会吃掉四角（安全区约中心 66%）。
+        -->
+        <icon background="@color/cdv_app_icon_background" density="ldpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
+        <icon background="@color/cdv_app_icon_background" density="mdpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
+        <icon background="@color/cdv_app_icon_background" density="hdpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
+        <icon background="@color/cdv_app_icon_background" density="xhdpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
+        <icon background="@color/cdv_app_icon_background" density="xxhdpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
+        <icon background="@color/cdv_app_icon_background" density="xxxhdpi" foreground="res/app-icon.jpg" src="res/app-icon.jpg" />
         <preference name="AndroidWindowSplashScreenBackground" value="#fff" />
         <preference name="AndroidWindowSplashScreenAnimatedIcon" value="res/logo.png" />
         <preference name="AndroidWindowSplashScreenAnimationDuration" value="400" />
