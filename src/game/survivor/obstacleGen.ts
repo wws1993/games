@@ -1,4 +1,21 @@
-import type { Obstacle } from './types';
+import type { Obstacle, ObstacleTextureVariant } from './types';
+
+/** 在土黄、灰褐、青灰范围内取随机墙色，并配更深的描边色 */
+function randomObstacleColors(rng: () => number): { fillColor: number; strokeColor: number } {
+  const pick = () => 28 + rng() * 52;
+  const r = pick();
+  const g = pick() * 0.88;
+  const b = pick() * 0.72;
+  const fr = Math.min(255, Math.round(r + (rng() - 0.5) * 18));
+  const fg = Math.min(255, Math.round(g + (rng() - 0.5) * 16));
+  const fb = Math.min(255, Math.round(b + (rng() - 0.5) * 14));
+  const fillColor = (fr << 16) | (fg << 8) | fb;
+  const sr = Math.max(0, Math.round(fr * 0.42));
+  const sg = Math.max(0, Math.round(fg * 0.38));
+  const sb = Math.max(0, Math.round(fb * 0.34));
+  const strokeColor = (sr << 16) | (sg << 8) | sb;
+  return { fillColor, strokeColor };
+}
 
 /** 与已有障碍膨胀间距，避免完全贴死 */
 function inflatesOverlap(ax: number, ay: number, aw: number, ah: number, pad: number, o: Obstacle): boolean {
@@ -51,7 +68,10 @@ export function generateObstacles(
       }
     }
     if (ok) {
-      list.push({ x, y, w, h });
+      const { fillColor, strokeColor } = randomObstacleColors(rng);
+      const textureVariant = Math.floor(rng() * 4) as ObstacleTextureVariant;
+      const textureSeed = rng();
+      list.push({ x, y, w, h, fillColor, strokeColor, textureVariant, textureSeed });
     }
   }
   return list;

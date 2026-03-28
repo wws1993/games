@@ -95,3 +95,47 @@ export function playerBulletBlockedByObstacles(
   }
   return false;
 }
+
+/** 两轴对齐矩形是否相交（用于障碍互斥） */
+export function aabbIntersectsAabb(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+): boolean {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+/** 障碍矩形完全落在方形世界内 */
+export function obstacleFitsInWorld(o: Obstacle, worldSize: number): boolean {
+  return o.x >= 0 && o.y >= 0 && o.x + o.w <= worldSize && o.y + o.h <= worldSize;
+}
+
+/**
+ * 障碍当前位置是否合法：贴世界边界且不与其他障碍穿透
+ * @param skipIndex - `obstacles` 中自身下标，校验时跳过
+ */
+export function obstaclePlacementValid(
+  o: Obstacle,
+  worldSize: number,
+  obstacles: readonly Obstacle[],
+  skipIndex: number,
+): boolean {
+  if (!obstacleFitsInWorld(o, worldSize)) {
+    return false;
+  }
+  for (let i = 0; i < obstacles.length; i++) {
+    if (i === skipIndex) {
+      continue;
+    }
+    const b = obstacles[i]!;
+    if (aabbIntersectsAabb(o.x, o.y, o.w, o.h, b.x, b.y, b.w, b.h)) {
+      return false;
+    }
+  }
+  return true;
+}

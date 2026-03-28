@@ -11,9 +11,6 @@ export interface MoveInput {
   analogY?: number;
 }
 
-/** 升级三选一（阶段 1 固定三种） */
-export type LevelUpChoiceId = 'damage' | 'moveSpeed' | 'maxHp';
-
 /** 敌人实例：字段在刷新时从表拷贝并已乘难度倍率 */
 export interface Enemy {
   id: number;
@@ -29,6 +26,12 @@ export interface Enemy {
   gemValue: number;
   /** 上次对玩家造成接触伤害的时间戳（秒，gameTime） */
   lastHitPlayerAt: number;
+  /** 追玩家朝向 X（归一化），供左右翻转 */
+  facingX: number;
+  /** 追玩家朝向 Y（归一化） */
+  facingY: number;
+  /** 走路动画相位（弧度），由模型每帧累加 */
+  animPhase: number;
   /** 远程射击剩余冷却（秒），无远程则为 0 */
   rangedCd: number;
   /** 远程参数快照；无远程为 undefined */
@@ -37,16 +40,29 @@ export interface Enemy {
     damage: number;
     interval: number;
     projSpeed: number;
+    /** 远程开火最大距离（来自 `enemyGameConfig`） */
+    attackRange: number;
     blastRadius?: number;
   };
 }
 
-/** 轴对齐矩形障碍（土房等），阻挡移动与普通弹体 */
+/** 纹理变体：砖纹横砌 / 木板竖纹 / 斜纹 / 碎石噪点 */
+export type ObstacleTextureVariant = 0 | 1 | 2 | 3;
+
+/** 轴对齐矩形障碍（土房等），阻挡移动与普通弹体；`fillColor` 等仅用于地图绘制 */
 export interface Obstacle {
   x: number;
   y: number;
   w: number;
   h: number;
+  /** 墙面主色（RGB） */
+  fillColor: number;
+  /** 勾边与深缝色 */
+  strokeColor: number;
+  /** 程序化纹理种类 */
+  textureVariant: ObstacleTextureVariant;
+  /** 0～1，影响纹理相位与砖行高，使相邻障碍不对齐 */
+  textureSeed: number;
 }
 
 export interface Bullet {

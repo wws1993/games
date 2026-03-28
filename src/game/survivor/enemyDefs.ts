@@ -1,7 +1,13 @@
 /**
- * 兵种与刷怪权重（阶段 2）：数值贴合 `docs/敌后幸存者-游戏分步开发设计文档.md`，可在表中再调
+ * 兵种与刷怪权重（阶段 2）：表数据来自 `config/enemyConfig.ts`，此处为运行时 `EnemyDef` 与加权随机
  */
-export type EnemyKind = 'infantry' | 'puppet' | 'dog' | 'cavalry' | 'mg' | 'artillery' | 'officer';
+import {
+  ENEMY_KIND_ORDER,
+  enemyGameConfig,
+  type EnemyKind,
+} from '../config/enemyConfig';
+
+export type { EnemyKind } from '../config/enemyConfig';
 
 /** 远程类型：机枪直线弹、炮弹落点爆炸 */
 export type EnemyRangedType = 'mg' | 'shell';
@@ -20,33 +26,39 @@ export interface EnemyDef {
     damage: number;
     cooldown: number;
     projSpeed: number;
+    /** 超过此距离开火逻辑不发射（见 `SurvivorGameModel._enemyRangedTick`） */
+    attackRange: number;
     shellBlastRadius?: number;
   };
 }
 
-export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
-  infantry: { radius: 12, baseHp: 32, speed: 78, contactDamage: 10, gemMultiplier: 1 },
-  puppet: { radius: 11, baseHp: 18, speed: 52, contactDamage: 5, gemMultiplier: 0.85 },
-  dog: { radius: 8, baseHp: 14, speed: 132, contactDamage: 8, gemMultiplier: 0.9 },
-  cavalry: { radius: 14, baseHp: 42, speed: 108, contactDamage: 15, gemMultiplier: 1.1 },
-  mg: {
-    radius: 13,
-    baseHp: 95,
-    speed: 34,
-    contactDamage: 8,
-    gemMultiplier: 1.2,
-    ranged: { type: 'mg', damage: 12, cooldown: 1.12, projSpeed: 340 },
-  },
-  artillery: {
-    radius: 15,
-    baseHp: 220,
-    speed: 20,
-    contactDamage: 6,
-    gemMultiplier: 1.5,
-    ranged: { type: 'shell', damage: 20, cooldown: 2.35, projSpeed: 155, shellBlastRadius: 56 },
-  },
-  officer: { radius: 14, baseHp: 300, speed: 70, contactDamage: 25, gemMultiplier: 10 },
-};
+function buildEnemyDefs(): Record<EnemyKind, EnemyDef> {
+  const { stats } = enemyGameConfig;
+  const out = {} as Record<EnemyKind, EnemyDef>;
+  for (const k of ENEMY_KIND_ORDER) {
+    const s = stats[k];
+    out[k] = {
+      radius: s.radius,
+      baseHp: s.baseHp,
+      speed: s.speed,
+      contactDamage: s.contactDamage,
+      gemMultiplier: s.gemMultiplier,
+      ranged: s.ranged
+        ? {
+            type: s.ranged.type,
+            damage: s.ranged.damage,
+            cooldown: s.ranged.cooldownSec,
+            projSpeed: s.ranged.projSpeed,
+            attackRange: s.ranged.attackRange,
+            shellBlastRadius: s.ranged.shellBlastRadius,
+          }
+        : undefined,
+    };
+  }
+  return out;
+}
+
+export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = buildEnemyDefs();
 
 export interface SpawnWeight {
   kind: EnemyKind;
@@ -54,28 +66,16 @@ export interface SpawnWeight {
 }
 
 /**
- * 按存活秒数返回当前可刷新的兵种及权重（时间轴与设计文档 0–3、3–5… 分钟一致）
+ * 按存活秒数返回当前可刷新的兵种及权重（解锁时间由 `enemyGameConfig.spawnByKind` 配置）
  * @param gameTimeSec - 本局已进行秒数
  */
 export function getSpawnWeights(gameTimeSec: number): SpawnWeight[] {
-  const w: SpawnWeight[] = [
-    { kind: 'infantry', weight: 3 },
-    { kind: 'puppet', weight: 2 },
-  ];
-  if (gameTimeSec >= 180) {
-    w.push({ kind: 'dog', weight: 2 });
-  }
-  if (gameTimeSec >= 300) {
-    w.push({ kind: 'cavalry', weight: 2 });
-  }
-  if (gameTimeSec >= 420) {
-    w.push({ kind: 'mg', weight: 1.2 });
-  }
-  if (gameTimeSec >= 480) {
-    w.push({ kind: 'officer', weight: 0.55 });
-  }
-  if (gameTimeSec >= 600) {
-    w.push({ kind: 'artillery', weight: 0.65 });
+  const w: SpawnWeight[] = [];
+  for (const kind of ENEMY_KIND_ORDER) {
+    const p = enemyGameConfig.spawnByKind[kind];
+    if (gameTimeSec >= p.unlockAfterSec && p.spawnWeight > 0) {
+      w.push({ kind, weight: p.spawnWeight });
+    }
   }
   return w;
 }
@@ -89,17 +89,31 @@ export function difficultyMultiplier(gameTimeSec: number): number {
   return Math.pow(1.05, minute);
 }
 
-/** 刷怪间隔：约 1 只/秒 逐步过渡到约 5 只/秒（15 分钟局用 900s 拉满） */
+/** 从开局间隔拉满到 `SPAWN_INTERVAL_END_SEC` 所用秒数（越短中期越密） */
+export const SPAWN_RAMP_SEC = enemyGameConfig.curve.rampSec;
+
+/** 开局约 1.4 只/秒（由 `intervalStartSec` 推导） */
+export const SPAWN_INTERVAL_START_SEC = enemyGameConfig.curve.intervalStartSec;
+
+/** 后期约 10 只/秒量级 */
+export const SPAWN_INTERVAL_END_SEC = enemyGameConfig.curve.intervalEndSec;
+
+/**
+ * 刷怪间隔（秒）：开局偏密、较快拉满；`t` 在 `SPAWN_RAMP_SEC` 内从 `hi` 线性落到 `lo`
+ * @param gameTimeSec - 本局秒数
+ */
 export function spawnIntervalForTime(gameTimeSec: number): number {
-  const t = Math.min(1, gameTimeSec / 900);
-  const hi = 2.15;
-  const lo = 0.22;
+  const { rampSec, intervalStartSec: hi, intervalEndSec: lo } = enemyGameConfig.curve;
+  const t = Math.min(1, gameTimeSec / rampSec);
   return hi + (lo - hi) * t;
 }
 
 /** 按当前时间权重随机一个可刷新兵种 */
 export function pickSpawnKind(gameTimeSec: number): EnemyKind {
   const weights = getSpawnWeights(gameTimeSec);
+  if (weights.length === 0) {
+    return 'infantry';
+  }
   let sum = 0;
   for (const w of weights) {
     sum += w.weight;
