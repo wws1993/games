@@ -453,7 +453,7 @@ export class SurvivorGameModel {
   }
 
   /**
-   * 按队形在边缘附近生成一批同种敌人
+   * 按队形在玩家周围环带内生成一批同种敌人
    * @param kind - 兵种
    * @param count - 数量
    * @param formation - 队形策略
@@ -479,138 +479,96 @@ export class SurvivorGameModel {
     this._spawnVShape(kind, count);
   }
 
-  /** 随机边、随机位置（单只） */
-  private _spawnEnemyAtEdgeRandom(kind: EnemyKind): void {
-    const def = ENEMY_DEFS[kind];
-    const r = def.radius;
+  /** 将刷怪圆心夹在世界可碰撞矩形内（半径 `circleR`） */
+  private _clampSpawnCenterToWorld(x: number, y: number, circleR: number): { x: number; y: number } {
     const m = WORLD_SIZE;
-    const edge = Math.floor(Math.random() * 4);
-    let x = 0;
-    let y = 0;
-    if (edge === 0) {
-      x = Math.random() * m;
-      y = -r;
-    } else if (edge === 1) {
-      x = m + r;
-      y = Math.random() * m;
-    } else if (edge === 2) {
-      x = Math.random() * m;
-      y = m + r;
-    } else {
-      x = -r;
-      y = Math.random() * m;
-    }
-    this._spawnEnemyAt(kind, x, y);
+    return {
+      x: Math.min(m - circleR, Math.max(circleR, x)),
+      y: Math.min(m - circleR, Math.max(circleR, y)),
+    };
   }
 
-  /** 同一边上沿切向排成线段，避免重叠过近 */
+  /**
+   * 在玩家周围环带内随机取一点（极坐标均匀），再夹在世界内；大地图下边刷改为相对玩家，避免初见在屏幕外过远
+   * @param circleR - 敌人碰撞半径，用于边界夹取
+   */
+  private _randomSpawnOnRingAroundPlayer(circleR: number): { x: number; y: number } {
+    const band = ENEMY_SPAWN_RING_MAX_DIST - ENEMY_SPAWN_RING_MIN_DIST;
+    const d = ENEMY_SPAWN_RING_MIN_DIST + Math.random() * band;
+    const ang = Math.random() * Math.PI * 2;
+    const x = this.playerX + Math.cos(ang) * d;
+    const y = this.playerY + Math.sin(ang) * d;
+    return this._clampSpawnCenterToWorld(x, y, circleR);
+  }
+
+  /** 随机角度、随机环带半径（单只） */
+  private _spawnEnemyAtEdgeRandom(kind: EnemyKind): void {
+    const def = ENEMY_DEFS[kind];
+    const p = this._randomSpawnOnRingAroundPlayer(def.radius);
+    this._spawnEnemyAt(kind, p.x, p.y);
+  }
+
+  /** 环上一点为锚、沿切向排成线段，避免重叠过近 */
   private _spawnLineAlongEdge(kind: EnemyKind, count: number): void {
     const def = ENEMY_DEFS[kind];
     const r = def.radius;
-    const m = WORLD_SIZE;
-    const edge = Math.floor(Math.random() * 4);
+    const band = ENEMY_SPAWN_RING_MAX_DIST - ENEMY_SPAWN_RING_MIN_DIST;
+    const d = ENEMY_SPAWN_RING_MIN_DIST + (0.35 + Math.random() * 0.3) * band;
+    const theta = Math.random() * Math.PI * 2;
+    const ux = Math.cos(theta);
+    const uy = Math.sin(theta);
+    const tx = -uy;
+    const ty = ux;
+    let cx = this.playerX + ux * d;
+    let cy = this.playerY + uy * d;
+    const c0 = this._clampSpawnCenterToWorld(cx, cy, r);
+    cx = c0.x;
+    cy = c0.y;
     const spacing = Math.max(r * 2.4, 30);
     const span = spacing * Math.max(0, count - 1);
-    const baseRaw = r + Math.random() * Math.max(1, m - 2 * r - span);
+    const baseOff = -span * 0.5 + (Math.random() - 0.5) * Math.min(spacing, 24);
     for (let i = 0; i < count; i++) {
-      const off = i * spacing;
-      const along = baseRaw + off;
-      let x = 0;
-      let y = 0;
-      if (edge === 0) {
-        x = Math.min(m - r, Math.max(r, along));
-        y = -r;
-      } else if (edge === 1) {
-        x = m + r;
-        y = Math.min(m - r, Math.max(r, along));
-      } else if (edge === 2) {
-        x = Math.min(m - r, Math.max(r, along));
-        y = m + r;
-      } else {
-        x = -r;
-        y = Math.min(m - r, Math.max(r, along));
-      }
-      this._spawnEnemyAt(kind, x, y);
+      const off = baseOff + i * spacing;
+      let x = cx + tx * off;
+      let y = cy + ty * off;
+      const c1 = this._clampSpawnCenterToWorld(x, y, r);
+      this._spawnEnemyAt(kind, c1.x, c1.y);
     }
   }
 
-  /** 同一锚点附近小范围随机散布 */
+  /** 同一锚点（环带内）附近小范围随机散布 */
   private _spawnTightCluster(kind: EnemyKind, count: number): void {
     const def = ENEMY_DEFS[kind];
     const r = def.radius;
-    const m = WORLD_SIZE;
-    const edge = Math.floor(Math.random() * 4);
-    const baseAlong = r + Math.random() * (m - 2 * r);
-    let ax = 0;
-    let ay = 0;
-    if (edge === 0) {
-      ax = baseAlong;
-      ay = -r;
-    } else if (edge === 1) {
-      ax = m + r;
-      ay = baseAlong;
-    } else if (edge === 2) {
-      ax = baseAlong;
-      ay = m + r;
-    } else {
-      ax = -r;
-      ay = baseAlong;
-    }
+    const anchor = this._randomSpawnOnRingAroundPlayer(r);
     const jitter = Math.max(18, r * 1.2);
     for (let i = 0; i < count; i++) {
-      let x = ax + (Math.random() - 0.5) * jitter * 2;
-      let y = ay + (Math.random() - 0.5) * jitter * 2;
-      if (edge === 0 || edge === 2) {
-        x = Math.min(m - r, Math.max(r, x));
-      } else {
-        y = Math.min(m - r, Math.max(r, y));
-      }
-      this._spawnEnemyAt(kind, x, y);
+      let x = anchor.x + (Math.random() - 0.5) * jitter * 2;
+      let y = anchor.y + (Math.random() - 0.5) * jitter * 2;
+      const c = this._clampSpawnCenterToWorld(x, y, r);
+      this._spawnEnemyAt(kind, c.x, c.y);
     }
   }
 
-  /** 向地图内侧张开的 V 字（先放「尖端」再两翼） */
+  /** 朝向玩家张开的 V 字（先放「尖端」再两翼） */
   private _spawnVShape(kind: EnemyKind, count: number): void {
     const def = ENEMY_DEFS[kind];
     const r = def.radius;
-    const m = WORLD_SIZE;
-    const edge = Math.floor(Math.random() * 4);
-    const baseAlong = r + Math.random() * (m - 2 * r);
-    let ax = 0;
-    let ay = 0;
-    let nx = 0;
-    let ny = 0;
-    let tx = 0;
-    let ty = 0;
-    if (edge === 0) {
-      ax = baseAlong;
-      ay = -r;
-      nx = 0;
-      ny = 1;
-      tx = 1;
-      ty = 0;
-    } else if (edge === 1) {
-      ax = m + r;
-      ay = baseAlong;
-      nx = -1;
-      ny = 0;
-      tx = 0;
-      ty = 1;
-    } else if (edge === 2) {
-      ax = baseAlong;
-      ay = m + r;
-      nx = 0;
-      ny = -1;
-      tx = 1;
-      ty = 0;
-    } else {
-      ax = -r;
-      ay = baseAlong;
+    const anchor = this._randomSpawnOnRingAroundPlayer(r);
+    const ax = anchor.x;
+    const ay = anchor.y;
+    let nx = this.playerX - ax;
+    let ny = this.playerY - ay;
+    const len = Math.hypot(nx, ny);
+    if (len < 1e-3) {
       nx = 1;
       ny = 0;
-      tx = 0;
-      ty = 1;
+    } else {
+      nx /= len;
+      ny /= len;
     }
+    const tx = -ny;
+    const ty = nx;
     const stepIn = r * 2.2;
     const stepSide = r * 2.0;
     for (let i = 0; i < count; i++) {
@@ -627,7 +585,8 @@ export class SurvivorGameModel {
       }
       const x = ax + ox;
       const y = ay + oy;
-      this._spawnEnemyAt(kind, x, y);
+      const c = this._clampSpawnCenterToWorld(x, y, r);
+      this._spawnEnemyAt(kind, c.x, c.y);
     }
   }
 

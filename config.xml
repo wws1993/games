@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.moretime2023.rougelike" version="3.2.2" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+<widget id="com.moretime2023.rougelike" version="3.2.3" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>敌后幸存者</name>
     <description>是兄弟，就来砍鬼子</description>
     <author email="moretime_2023@163.com" href="moretime_2023@163.com">moretime_2023@163.com</author>
