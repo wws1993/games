@@ -21,6 +21,7 @@ import { drawObstacleOnMap } from '../game/survivor/obstacleVisual';
 import { PlayerWorldVisual } from '../game/survivor/playerWorldVisual';
 import { levelUpCardTierPresentation, type LevelUpCardDef } from '../game/config/levelUpCardsConfig';
 import { recordRunEndForAchievements } from '../game/meta/achievementStore';
+import { computeRunMerit } from '../game/meta/meritFormula';
 import {
   cycleDevTimeScale,
   getDevBonusMaxHp,
@@ -32,9 +33,10 @@ import {
 import { SurvivorGameModel } from '../game/survivor/SurvivorGameModel';
 import type { MoveInput } from '../game/survivor/types';
 import { VirtualJoystick } from '../ui/VirtualJoystick';
+import { exitGameToReactHome } from '../ui/shellBridge';
 import { app } from '../utils/application';
+import { formatDurationCn } from '../utils/formatDuration';
 import type { AppScreen } from '../utils/navigation';
-import { navigation } from '../utils/navigation';
 
 /** 玩法屏：阶段 1 核心循环（移动、步枪、步兵、经验、升级三选一、HUD） */
 export class GameScreen extends Container implements AppScreen {
@@ -58,6 +60,9 @@ export class GameScreen extends Container implements AppScreen {
   private readonly _hudGfx = new Graphics();
   private readonly _timeText: Text;
   private readonly _levelText: Text;
+  private readonly _fpsText: Text;
+  /** 开启宝箱后的短时提示（屏幕中下） */
+  private readonly _chestToastText: Text;
   private readonly _levelUpRoot = new Container();
   private readonly _levelUpDim = new Graphics();
   private readonly _levelUpTitle!: Text;
@@ -68,6 +73,7 @@ export class GameScreen extends Container implements AppScreen {
   private readonly _gameOverRoot = new Container();
   private readonly _gameOverDim = new Graphics();
   private readonly _gameOverTitle: Text;
+  private readonly _gameOverStats: Text;
   private readonly _gameOverHint: Text;
 
   private readonly _joystick: VirtualJoystick;
@@ -107,6 +113,14 @@ export class GameScreen extends Container implements AppScreen {
   private _worldScale = 1;
   /** 防止阵亡连点重复写入成就 */
   private _achievementSettled = false;
+
+  /** 与 `_drawHud` 配合：仅秒数或等级变化时重算右上角 `Text` 布局 */
+  private _lastHudTimeInt = -1;
+
+  private _lastHudLevel = 0;
+
+  /** 对 `Ticker.FPS` 做指数平滑，避免数字剧烈跳动 */
+  private _fpsSmoothed = 60;
 
   constructor() {
     super();
@@ -150,6 +164,31 @@ export class GameScreen extends Container implements AppScreen {
         dropShadow: { blur: 2, distance: 1, color: 0x000000, alpha: 0.8 },
       }),
     });
+    this._fpsText = new Text({
+      text: '60 FPS',
+      style: new TextStyle({
+        fontFamily: hudFont,
+        fontSize: 14,
+        fontWeight: '600',
+        fill: 0x9fdf90,
+        dropShadow: { blur: 2, distance: 1, color: 0x000000, alpha: 0.75 },
+      }),
+    });
+    this._chestToastText = new Text({
+      text: '',
+      style: new TextStyle({
+        fontFamily: hudFont,
+        fontSize: 15,
+        fontWeight: 'bold',
+        fill: 0xffe8a8,
+        align: 'center',
+        wordWrap: true,
+        wordWrapWidth: 320,
+        dropShadow: { blur: 4, distance: 1, color: 0x000000, alpha: 0.9 },
+      }),
+    });
+    this._chestToastText.anchor.set(0.5, 0.5);
+    this._chestToastText.visible = false;
 
     this._worldRoot.addChild(
       this._mapBg,
@@ -165,7 +204,14 @@ export class GameScreen extends Container implements AppScreen {
       e.stopPropagation();
       this._onHealthBarTripleTap();
     });
-    this._hudRoot.addChild(this._hudGfx, this._timeText, this._levelText, this._hpBarDevHit);
+    this._hudRoot.addChild(
+      this._hudGfx,
+      this._timeText,
+      this._levelText,
+      this._fpsText,
+      this._chestToastText,
+      this._hpBarDevHit,
+    );
 
     this._buildLevelUpUi();
     this._buildGameOverUi();
@@ -202,7 +248,12 @@ export class GameScreen extends Container implements AppScreen {
     this._levelUpOfferKey = '';
     this._updateDevSpeedLabel();
     this._refreshCornerDevLabels();
+    this._lastHudTimeInt = -1;
+    this._lastHudLevel = 0;
+    this._fpsSmoothed = 60;
+    this._fpsText.text = '60 FPS';
     this._drawMapBackground();
+    this._drawMapObstacles();
   }
 
   /** 订阅键盘；淡入由导航 `show` 调用，此处无需异步 */
@@ -221,8 +272,13 @@ export class GameScreen extends Container implements AppScreen {
 
   /** 驱动模型与绘制 */
   public update(ticker: Ticker): void {
+    const fpsBlend = 0.15;
+    this._fpsSmoothed += (ticker.FPS - this._fpsSmoothed) * fpsBlend;
     const dt = (ticker.deltaMS / 1000) * this._timeScale;
     this._model.step(dt, this._readMoveInput());
+    if (this._model.chestToastRemain > 0) {
+      this._model.chestToastRemain = Math.max(0, this._model.chestToastRemain - dt);
+    }
     this._syncCameraAndWorld();
     const frozen = this._model.paused || this._model.gameOver;
     this._playerWorldVisual.sync(this._model, dt, frozen);
@@ -240,6 +296,7 @@ export class GameScreen extends Container implements AppScreen {
     this._h = h;
     this._drawScreenBackdrop();
     this._worldScale = Math.min(w, h) / CAMERA_VIEW_WORLD_ON_SHORT_SIDE;
+    this._chestToastText.style.wordWrapWidth = Math.min(340, Math.max(120, w - 32));
     this._drawMapBackground();
     this._joystick.layout(w, h);
     this._layoutHud();
@@ -300,14 +357,18 @@ export class GameScreen extends Container implements AppScreen {
     soil.addColorStop(1, 0x2e3b28);
     g.rect(0, 0, m, m).fill({ fill: soil });
     g.rect(0, 0, m, m).stroke({ width: 4, color: 0x1e2418, alpha: 0.9 });
-    this._drawMapObstacles();
   }
 
-  /** 障碍与模型同步；每帧调用以反映推箱子位移 */
+  /** 障碍与模型同步；静止时跳过整层重绘（`SurvivorGameModel.obstaclesDirty`） */
   private _drawMapObstacles(): void {
+    const m = this._model;
+    if (!m.obstaclesDirty) {
+      return;
+    }
+    m.obstaclesDirty = false;
     const g = this._mapObstacles;
     g.clear();
-    for (const o of this._model.obstacles) {
+    for (const o of m.obstacles) {
       drawObstacleOnMap(g, o);
     }
   }
@@ -322,6 +383,50 @@ export class GameScreen extends Container implements AppScreen {
     );
   }
 
+  /**
+   * 敌人头顶环形血条：用闭合路径 `fill` 画圆环扇段；开口弧 `stroke` 在部分手机 GPU 上会错误三角化，出现指向地图一侧的「红线」
+   * @param g - 世界层 `Graphics`
+   * @param cx - 敌人圆心 x
+   * @param cy - 敌人圆心 y
+   * @param er - 敌人碰撞半径
+   * @param ratio - 当前血量比例 0～1
+   */
+  private _drawEnemyHpRing(g: Graphics, cx: number, cy: number, er: number, ratio: number): void {
+    const rIn = er + 2.5;
+    const rOut = er + 5.5;
+    g.moveTo(cx + rOut, cy);
+    g.arc(cx, cy, rOut, 0, Math.PI * 2, false);
+    g.arc(cx, cy, rIn, Math.PI * 2, 0, true);
+    g.closePath();
+    g.fill({ color: 0x1a0808, alpha: 0.62 });
+
+    const hp = Math.max(0, Math.min(1, ratio));
+    if (hp < 0.004) {
+      return;
+    }
+    if (hp >= 0.998) {
+      g.moveTo(cx + rOut, cy);
+      g.arc(cx, cy, rOut, 0, Math.PI * 2, false);
+      g.arc(cx, cy, rIn, Math.PI * 2, 0, true);
+      g.closePath();
+      g.fill({ color: 0xff6666, alpha: 0.92 });
+      return;
+    }
+    const a0 = -Math.PI / 2;
+    const a1 = a0 + Math.PI * 2 * hp;
+    const c0 = Math.cos(a0);
+    const s0 = Math.sin(a0);
+    const c1 = Math.cos(a1);
+    const s1 = Math.sin(a1);
+    g.moveTo(cx + c0 * rIn, cy + s0 * rIn);
+    g.lineTo(cx + c0 * rOut, cy + s0 * rOut);
+    g.arc(cx, cy, rOut, a0, a1, false);
+    g.lineTo(cx + c1 * rIn, cy + s1 * rIn);
+    g.arc(cx, cy, rIn, a1, a0, true);
+    g.closePath();
+    g.fill({ color: 0xff6666, alpha: 0.92 });
+  }
+
   /** 重绘动态实体（玩家、敌、弹、宝石） */
   private _drawWorldEntities(): void {
     const g = this._worldGfx;
@@ -329,16 +434,27 @@ export class GameScreen extends Container implements AppScreen {
     const m = this._model;
 
     for (const e of m.enemies) {
-      const er = e.radius;
-      const ratio = Math.max(0, e.hp / e.maxHp);
-      g.arc(e.x, e.y, er + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio).stroke({
-        width: 3,
-        color: 0xff6666,
-      });
+      const ratio = e.maxHp > 0 ? e.hp / e.maxHp : 0;
+      this._drawEnemyHpRing(g, e.x, e.y, e.radius, ratio);
     }
 
     for (const b of m.bullets) {
       g.circle(b.x, b.y, RIFLE_BULLET_RADIUS).fill({ color: 0xfff3b0 });
+    }
+
+    /** 炮兵炮弹：在预定落点绘制闪烁预警圆（阶段 2.1；弹体绘制在其后，叠在上层） */
+    const shellPulseT = m.gameTime;
+    for (const ep of m.enemyProjectiles) {
+      if (ep.projKind !== 'shell') {
+        continue;
+      }
+      const tx = ep.targetX ?? ep.x;
+      const ty = ep.targetY ?? ep.y;
+      const br = ep.blastRadius ?? 52;
+      const phase = shellPulseT * 6.8 + ep.x * 0.015 + ep.y * 0.015;
+      const pulse = 0.18 + 0.14 * Math.sin(phase);
+      g.circle(tx, ty, br).fill({ color: 0xaa1100, alpha: pulse * 0.38 });
+      g.circle(tx, ty, br).stroke({ width: 2.5, color: 0xff5522, alpha: 0.42 + pulse * 0.38 });
     }
 
     for (const ep of m.enemyProjectiles) {
@@ -348,6 +464,16 @@ export class GameScreen extends Container implements AppScreen {
         g.circle(ep.x, ep.y, ep.hitRadius + 2).fill({ color: 0x553322, alpha: 0.9 });
         g.circle(ep.x, ep.y, ep.hitRadius).fill({ color: 0xcc5522, alpha: 0.95 });
       }
+    }
+
+    for (const ch of m.chests) {
+      const bw = 24;
+      const bh = 17;
+      const hx = ch.x - bw * 0.5;
+      const hy = ch.y - bh * 0.5;
+      g.roundRect(hx, hy, bw, bh, 4).fill({ color: 0x6b4a12, alpha: 0.96 });
+      g.roundRect(hx + 2, hy + 3, bw - 4, bh - 6, 2).fill({ color: 0xc9a227, alpha: 0.88 });
+      g.roundRect(hx, hy, bw, bh, 4).stroke({ width: 1.5, color: 0xffe566, alpha: 0.9 });
     }
 
     for (const gem of m.gems) {
@@ -378,12 +504,37 @@ export class GameScreen extends Container implements AppScreen {
     g.roundRect(pad + 2, xpY + 2, (barW - 4) * xpRatio, barH - 4, 4).fill({ color: 0x3a7cc4 });
 
     const t = Math.floor(m.gameTime);
-    const mm = Math.floor(t / 60);
-    const ss = t % 60;
-    this._timeText.text = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
-    this._levelText.text = `Lv ${m.level}`;
+    const hudMetaChanged = t !== this._lastHudTimeInt || m.level !== this._lastHudLevel;
+    if (hudMetaChanged) {
+      this._lastHudTimeInt = t;
+      this._lastHudLevel = m.level;
+      const mm = Math.floor(t / 60);
+      const ss = t % 60;
+      this._timeText.text = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+      this._levelText.text = `Lv ${m.level}`;
+    }
+    const fpsLabel = `${Math.round(this._fpsSmoothed)} FPS`;
+    let fpsLabelChanged = false;
+    if (this._fpsText.text !== fpsLabel) {
+      this._fpsText.text = fpsLabel;
+      fpsLabelChanged = true;
+    }
+    const toastActive = m.chestToastRemain > 0 && m.chestToastTitle.length > 0;
+    if (toastActive) {
+      this._chestToastText.visible = true;
+      const prefix = '宝箱：';
+      const line = `${prefix}${m.chestToastTitle}`;
+      if (this._chestToastText.text !== line) {
+        this._chestToastText.text = line;
+      }
+      this._chestToastText.position.set(this._w * 0.5, this._h - 118);
+    } else {
+      this._chestToastText.visible = false;
+    }
 
-    this._layoutHud();
+    if (hudMetaChanged || this._devPanelOpen || fpsLabelChanged) {
+      this._layoutHud();
+    }
     this._layoutHpBarDevHit(pad, barW, barH, hpY);
   }
 
@@ -399,6 +550,7 @@ export class GameScreen extends Container implements AppScreen {
     const pad = 14;
     this._timeText.position.set(this._w - pad - this._timeText.width, pad);
     this._levelText.position.set(this._w - pad - this._levelText.width, pad + 28);
+    this._fpsText.position.set(this._w - pad - this._fpsText.width, pad + 52);
     if (this._devPanelOpen) {
       this._layoutDevPanel();
     }
@@ -1020,17 +1172,32 @@ export class GameScreen extends Container implements AppScreen {
     });
     this._gameOverTitle.anchor.set(0.5);
 
-    this._gameOverHint = new Text({
-      text: '点击屏幕返回',
+    this._gameOverStats = new Text({
+      text: '',
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
-        fontSize: 18,
-        fill: 0xaaaaaa,
+        fontSize: 16,
+        fontWeight: '600',
+        fill: 0xc8b8a0,
+        align: 'center',
+        lineHeight: 26,
+        wordWrap: true,
+        wordWrapWidth: 300,
+      }),
+    });
+    this._gameOverStats.anchor.set(0.5);
+
+    this._gameOverHint = new Text({
+      text: '点击屏幕返回首页并结算',
+      style: new TextStyle({
+        fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
+        fontSize: 17,
+        fill: 0x888888,
       }),
     });
     this._gameOverHint.anchor.set(0.5);
 
-    this._gameOverRoot.addChild(this._gameOverTitle, this._gameOverHint);
+    this._gameOverRoot.addChild(this._gameOverTitle, this._gameOverStats, this._gameOverHint);
 
     this._gameOverDim.on('pointertap', () => {
       if (!this._model.gameOver || this._achievementSettled) {
@@ -1042,15 +1209,24 @@ export class GameScreen extends Container implements AppScreen {
         died: true,
         survivalSec: this._model.gameTime,
       });
-      void import('./HomeScreen').then((m) => navigation.goToScreen(m.HomeScreen));
+      exitGameToReactHome();
     });
   }
 
   private _layoutGameOver(): void {
     this._gameOverDim.clear();
     this._gameOverDim.rect(0, 0, this._w, this._h).fill({ color: 0x050403, alpha: 0.88 });
-    this._gameOverTitle.position.set(this._w * 0.5, this._h * 0.42);
-    this._gameOverHint.position.set(this._w * 0.5, this._h * 0.52);
+    const m = this._model;
+    const merit = computeRunMerit(m.gameTime, m.sessionKills);
+    this._gameOverStats.style.wordWrapWidth = Math.min(320, this._w - 32);
+    this._gameOverStats.text = [
+      `存活 ${formatDurationCn(m.gameTime)}`,
+      `击破 ${m.sessionKills}`,
+      `本局军功 +${merit}`,
+    ].join('\n');
+    this._gameOverTitle.position.set(this._w * 0.5, this._h * 0.34);
+    this._gameOverStats.position.set(this._w * 0.5, this._h * 0.46);
+    this._gameOverHint.position.set(this._w * 0.5, this._h * 0.62);
   }
 
   private _syncGameOverVisibility(): void {

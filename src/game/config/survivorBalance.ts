@@ -24,9 +24,9 @@ export const survivorBalance: SurvivorBalanceConfig = {
     maxRange: 420,
   },
   spawn: {
-    intervalScale: 1,
+    intervalScale: 1.5,
   },
   enemy: {
-    moveSpeedScale: 0.85,
+    moveSpeedScale: 0.65,
   },
 };

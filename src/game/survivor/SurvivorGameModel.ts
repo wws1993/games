@@ -1,5 +1,8 @@
 import {
   CONTACT_DAMAGE_INTERVAL,
+  ENEMY_CONTACT_SEPARATION_PAD,
+  CHEST_RADIUS,
+  CHEST_SPAWN_INTERVAL_SEC,
   GEM_MAX_ON_FIELD,
   GEM_MERGE_RADIUS,
   GEM_RADIUS,
@@ -19,6 +22,8 @@ import {
   RIFLE_BULLET_RADIUS,
   RIFLE_BULLET_SPEED,
   RIFLE_COOLDOWN_SEC,
+  ENEMY_SPAWN_RING_MAX_DIST,
+  ENEMY_SPAWN_RING_MIN_DIST,
   WORLD_OBSTACLE_COUNT,
   WORLD_SIZE,
   WORLD_SPAWN_CLEAR_RADIUS,
@@ -49,7 +54,7 @@ import {
   spawnIntervalForTime,
 } from './enemyDefs';
 import type { EnemyKind } from './enemyDefs';
-import type { Bullet, Enemy, EnemyProjectile, MoveInput, Obstacle, XpGem } from './types';
+import type { Bullet, Enemy, EnemyProjectile, MoveInput, Obstacle, WorldChest, XpGem } from './types';
 
 /** 核心战斗与成长状态机：无 Pixi 依赖，供 `GameScreen` 每帧 `step` 驱动 */
 export class SurvivorGameModel {
@@ -155,8 +160,35 @@ export class SurvivorGameModel {
 
   public readonly gems: XpGem[] = [];
 
+  /** 定时刷新的可拾取宝箱（阶段 4.3） */
+  public readonly chests: WorldChest[] = [];
+
+  /** 下次按 `gameTime` 触发刷箱的时刻（秒）；`reset` 时设为 `CHEST_SPAWN_INTERVAL_SEC` */
+  private _nextChestSpawnGameTime = CHEST_SPAWN_INTERVAL_SEC;
+
+  /** 开启宝箱后 HUD 简短提示文案；与 `chestToastRemain` 配对 */
+  public chestToastTitle = '';
+
+  /** 宝箱提示剩余显示时间（秒），由 `GameScreen` 每帧扣减 */
+  public chestToastRemain = 0;
+
   /** 静态矩形障碍：挡人、挡怪、挡玩家普通子弹；不挡 `ignoresObstacles` 弹体 */
   public readonly obstacles: Obstacle[] = [];
+
+  /** 障碍几何相对上一帧有变化，需重绘地图障碍层（推箱子时置位；静止时可跳过数千次 `stroke`） */
+  public obstaclesDirty = true;
+
+  /** 步枪弹-敌碰撞：均匀网格边长（世界单位），与 `WORLD_SIZE` 组合成固定桶数 */
+  private static readonly _BULLET_HIT_GRID_CELL = 100;
+
+  /** `ceil(WORLD_SIZE / _BULLET_HIT_GRID_CELL)` */
+  private _bulletHitGridW = 0;
+
+  /** 每格 `Enemy[]`，惰性分配；每帧清空 `_bulletHitGridUsed` 中索引对应桶 */
+  private _bulletHitGridBuckets: Enemy[][] = [];
+
+  /** 本帧哪些桶非空，供下一帧开头 O(用过桶数) 清空 */
+  private readonly _bulletHitGridUsed: number[] = [];
 
   private _nextEnemyId = 1;
 
@@ -201,6 +233,10 @@ export class SurvivorGameModel {
     this.bullets.length = 0;
     this.enemyProjectiles.length = 0;
     this.gems.length = 0;
+    this.chests.length = 0;
+    this._nextChestSpawnGameTime = CHEST_SPAWN_INTERVAL_SEC;
+    this.chestToastTitle = '';
+    this.chestToastRemain = 0;
     this._nextEnemyId = 1;
     this.obstacles.length = 0;
     this.obstacles.push(
@@ -212,6 +248,7 @@ export class SurvivorGameModel {
         WORLD_OBSTACLE_COUNT,
       ),
     );
+    this.obstaclesDirty = true;
   }
 
   /**
@@ -244,7 +281,9 @@ export class SurvivorGameModel {
     this._enemyProjectileHits();
     this._bulletEnemyHits();
     this._enemyPlayerContact();
+    this._chestSpawnTick();
     this._pickupGems();
+    this._pickupChests();
     this._pruneOffMapBullets();
     this._pruneEnemyProjectiles();
   }
@@ -261,6 +300,15 @@ export class SurvivorGameModel {
     if (!card) {
       return;
     }
+    this._applyLevelUpCardEffect(card);
+    this.awaitingLevelUp = false;
+    this.pendingLevelUpCards.length = 0;
+    this.paused = false;
+    this._checkLevelUpFromXp();
+  }
+
+  /** 将单张升级卡数值写入局内状态（升级三选一与宝箱共用，不触暂停） */
+  private _applyLevelUpCardEffect(card: LevelUpCardDef): void {
     const ef = card.effect;
     if (ef.kind === 'damageMult') {
       this.damageMultiplier *= ef.factor;
@@ -281,10 +329,79 @@ export class SurvivorGameModel {
     } else if (ef.kind === 'pushObstacles') {
       this.canPushObstacles = true;
     }
-    this.awaitingLevelUp = false;
-    this.pendingLevelUpCards.length = 0;
-    this.paused = false;
-    this._checkLevelUpFromXp();
+  }
+
+  /** 与 `_rollLevelUpCards` 相同过滤规则（已持有推箱子则剔除该卡） */
+  private _eligibleLevelUpPool(): LevelUpCardDef[] {
+    return levelUpCardPool.filter(
+      (c) => !(c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles),
+    );
+  }
+
+  /** 宝箱奖励：池中均匀随机一张 */
+  private _pickRandomChestReward(): LevelUpCardDef | null {
+    const pool = this._eligibleLevelUpPool();
+    if (pool.length === 0) {
+      return null;
+    }
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  }
+
+  /** 到达 `gameTime` 里程碑时尝试在障碍外、距玩家与已有宝箱足够远处刷一只；大 dt 时按间隔递进避免漏刷 */
+  private _chestSpawnTick(): void {
+    const margin = 130;
+    const m = WORLD_SIZE;
+    const minFromPlayerSq = 220 * 220;
+    const minChestSepSq = 95 * 95;
+    while (this.gameTime >= this._nextChestSpawnGameTime) {
+      this._nextChestSpawnGameTime += CHEST_SPAWN_INTERVAL_SEC;
+      for (let attempt = 0; attempt < 64; attempt++) {
+        const rx = margin + Math.random() * (m - 2 * margin);
+        const ry = margin + Math.random() * (m - 2 * margin);
+        const sp = this._spawnPositionClearOfObstacles(rx, ry, CHEST_RADIUS);
+        const dx = sp.x - this.playerX;
+        const dy = sp.y - this.playerY;
+        if (dx * dx + dy * dy < minFromPlayerSq) {
+          continue;
+        }
+        let ok = true;
+        for (const ch of this.chests) {
+          const sx = sp.x - ch.x;
+          const sy = sp.y - ch.y;
+          if (sx * sx + sy * sy < minChestSepSq) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) {
+          continue;
+        }
+        this.chests.push({ x: sp.x, y: sp.y });
+        break;
+      }
+    }
+  }
+
+  /** 进入拾取范围则移除宝箱并立即应用随机强化（不弹三选一窗） */
+  private _pickupChests(): void {
+    const reach = this.pickupRadius + CHEST_RADIUS;
+    const reachSq = reach * reach;
+    for (let i = this.chests.length - 1; i >= 0; i--) {
+      const ch = this.chests[i]!;
+      const dx = ch.x - this.playerX;
+      const dy = ch.y - this.playerY;
+      if (dx * dx + dy * dy > reachSq) {
+        continue;
+      }
+      this.chests.splice(i, 1);
+      const card = this._pickRandomChestReward();
+      if (card) {
+        this._applyLevelUpCardEffect(card);
+        this.chestToastTitle = card.title;
+        this.chestToastRemain = 3.4;
+      }
+      this._checkLevelUpFromXp();
+    }
   }
 
   /** 本级升到下一级所需经验 */
@@ -312,9 +429,7 @@ export class SurvivorGameModel {
    */
   private _rollLevelUpCards(): void {
     this.pendingLevelUpCards.length = 0;
-    const pool = levelUpCardPool.filter(
-      (c) => !(c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles),
-    );
+    const pool = this._eligibleLevelUpPool();
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j]!, pool[i]!];
@@ -516,11 +631,51 @@ export class SurvivorGameModel {
     }
   }
 
+  /**
+   * 刷怪点与矩形障碍分离：先 `resolveCircleWithObstacles`，仍穿透则向地图中心微移迭代（阶段 4.1 合法化）
+   * @param x - 候选圆心 x（允许在地图外缘外，便于边刷）
+   * @param y - 候选圆心 y
+   * @param r - 敌人半径
+   */
+  private _spawnPositionClearOfObstacles(x: number, y: number, r: number): { x: number; y: number } {
+    let cx = x;
+    let cy = y;
+    const m = WORLD_SIZE;
+    const centerX = m * 0.5;
+    const centerY = m * 0.5;
+    const obs = this.obstacles;
+    for (let it = 0; it < 14; it++) {
+      const p = resolveCircleWithObstacles(cx, cy, r, obs);
+      cx = p.x;
+      cy = p.y;
+      let blocked = false;
+      for (let oi = 0; oi < obs.length; oi++) {
+        if (circleAabbOverlap(cx, cy, r, obs[oi]!)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) {
+        return { x: cx, y: cy };
+      }
+      const dx = centerX - cx;
+      const dy = centerY - cy;
+      const dlen = Math.hypot(dx, dy) || 1;
+      cx += (dx / dlen) * (r * 0.95);
+      cy += (dy / dlen) * (r * 0.95);
+    }
+    const p = resolveCircleWithObstacles(cx, cy, r, obs);
+    return { x: p.x, y: p.y };
+  }
+
   /** 在指定世界坐标生成一只敌人（属性乘当前难度倍率） */
   private _spawnEnemyAt(kind: EnemyKind, x: number, y: number): void {
     const def = ENEMY_DEFS[kind];
     const mul = difficultyMultiplier(this.gameTime);
     const r = def.radius;
+    const sp = this._spawnPositionClearOfObstacles(x, y, r);
+    x = sp.x;
+    y = sp.y;
     const esp = survivorBalance.enemy.moveSpeedScale;
     const enemySpeedMul = Number.isFinite(esp) && esp > 0 ? esp : 1;
 
@@ -627,6 +782,59 @@ export class SurvivorGameModel {
     this.playerY = Math.min(m - r, Math.max(r, this.playerY));
   }
 
+  /** 接触推开或刷怪后保证敌人圆心在地图内 */
+  private _clampEnemyInWorld(e: Enemy): void {
+    const r = e.radius;
+    const m = WORLD_SIZE;
+    e.x = Math.min(m - r, Math.max(r, e.x));
+    e.y = Math.min(m - r, Math.max(r, e.y));
+  }
+
+  /** 惰性分配固定大小的步枪弹宽相检测网格（子弹多时避免 O(弹×敌)） */
+  private _ensureBulletHitGrid(): void {
+    if (this._bulletHitGridBuckets.length > 0) {
+      return;
+    }
+    const cs = SurvivorGameModel._BULLET_HIT_GRID_CELL;
+    const gw = Math.ceil(WORLD_SIZE / cs);
+    this._bulletHitGridW = gw;
+    const n = gw * gw;
+    this._bulletHitGridBuckets = new Array(n);
+    for (let i = 0; i < n; i++) {
+      this._bulletHitGridBuckets[i] = [];
+    }
+  }
+
+  /** 将本帧敌人按包围盒写入网格桶（大体型敌可跨多格） */
+  private _fillBulletHitGrid(): void {
+    const gw = this._bulletHitGridW;
+    const cs = SurvivorGameModel._BULLET_HIT_GRID_CELL;
+    const used = this._bulletHitGridUsed;
+    const buckets = this._bulletHitGridBuckets;
+    for (let u = 0; u < used.length; u++) {
+      buckets[used[u]!]!.length = 0;
+    }
+    used.length = 0;
+    for (const e of this.enemies) {
+      const r = e.radius;
+      const minCx = Math.max(0, Math.floor((e.x - r) / cs));
+      const maxCx = Math.min(gw - 1, Math.floor((e.x + r) / cs));
+      const minCy = Math.max(0, Math.floor((e.y - r) / cs));
+      const maxCy = Math.min(gw - 1, Math.floor((e.y + r) / cs));
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const row = cy * gw;
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          const idx = cx + row;
+          const bucket = buckets[idx]!;
+          if (bucket.length === 0) {
+            used.push(idx);
+          }
+          bucket.push(e);
+        }
+      }
+    }
+  }
+
   /**
    * 由本帧位移得到施力主轴键；与上一帧键一致且贴箱时才累加 `_obstaclePushChargeT`
    * @param dt - 帧间隔（秒）
@@ -715,6 +923,7 @@ export class SurvivorGameModel {
         o.y += py;
         const ok = obstaclePlacementValid(o, WORLD_SIZE, obs, i);
         if (ok) {
+          this.obstaclesDirty = true;
           const sep = pushCircleOutOfAabb(this.playerX, this.playerY, r, o);
           this.playerX = sep.x;
           this.playerY = sep.y;
@@ -940,27 +1149,76 @@ export class SurvivorGameModel {
     }
   }
 
-  /** 玩家步枪弹与敌人：半径按兵种 */
+  /** 玩家步枪弹与敌人：半径按兵种；空间网格缩小弹道+1 后的邻域检测量 */
   private _bulletEnemyHits(): void {
-    outer: for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i]!;
-      for (const e of this.enemies) {
+    const bullets = this.bullets;
+    const enemies = this.enemies;
+    if (bullets.length === 0 || enemies.length === 0) {
+      return;
+    }
+    this._ensureBulletHitGrid();
+    this._fillBulletHitGrid();
+    const gw = this._bulletHitGridW;
+    const cs = SurvivorGameModel._BULLET_HIT_GRID_CELL;
+    const buckets = this._bulletHitGridBuckets;
+
+    outer: for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i]!;
+      const bx = b.x;
+      const by = b.y;
+      const cx = Math.floor(bx / cs);
+      const cy = Math.floor(by / cs);
+
+      const hitEnemy = (e: Enemy): void => {
+        let dmg = b.damage;
+        const cc = Math.min(1, Math.max(0, this.critChance));
+        if (cc > 0 && Math.random() < cc) {
+          dmg *= RIFLE_CRIT_BASE_MULT;
+          const ex = this.critOnHitDamageMult;
+          dmg *= Number.isFinite(ex) && ex > 0 ? ex : 1;
+        }
+        e.hp -= dmg;
+        bullets.splice(i, 1);
+        if (e.hp <= 0) {
+          this._onEnemyKilled(e);
+        }
+      };
+
+      const testEnemy = (e: Enemy): boolean => {
         const dx = e.x - b.x;
         const dy = e.y - b.y;
         const rr = e.radius + RIFLE_BULLET_RADIUS;
-        if (dx * dx + dy * dy <= rr * rr) {
-          let dmg = b.damage;
-          const cc = Math.min(1, Math.max(0, this.critChance));
-          if (cc > 0 && Math.random() < cc) {
-            dmg *= RIFLE_CRIT_BASE_MULT;
-            const ex = this.critOnHitDamageMult;
-            dmg *= Number.isFinite(ex) && ex > 0 ? ex : 1;
+        if (dx * dx + dy * dy > rr * rr) {
+          return false;
+        }
+        hitEnemy(e);
+        return true;
+      };
+
+      if (cx >= 0 && cx < gw && cy >= 0 && cy < gw) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const ncy = cy + oy;
+          if (ncy < 0 || ncy >= gw) {
+            continue;
           }
-          e.hp -= dmg;
-          this.bullets.splice(i, 1);
-          if (e.hp <= 0) {
-            this._onEnemyKilled(e);
+          const row = ncy * gw;
+          for (let ox = -1; ox <= 1; ox++) {
+            const ncx = cx + ox;
+            if (ncx < 0 || ncx >= gw) {
+              continue;
+            }
+            const bucket = buckets[ncx + row]!;
+            for (let k = 0; k < bucket.length; k++) {
+              if (testEnemy(bucket[k]!)) {
+                continue outer;
+              }
+            }
           }
+        }
+        continue;
+      }
+      for (let j = 0; j < enemies.length; j++) {
+        if (testEnemy(enemies[j]!)) {
           continue outer;
         }
       }
@@ -1023,15 +1281,39 @@ export class SurvivorGameModel {
     sink.y += (y - sink.y) * pullCap;
   }
 
-  /** 接触伤害：按兵种半径与伤害 */
+  /** 接触伤害：重叠时先把怪沿径向推开，再按间隔扣血，避免贴脸叠层连续受伤 */
   private _enemyPlayerContact(): void {
     for (const e of this.enemies) {
       const dx = e.x - this.playerX;
       const dy = e.y - this.playerY;
+      const distSq = dx * dx + dy * dy;
       const rr = e.radius + PLAYER_RADIUS;
-      if (dx * dx + dy * dy > rr * rr) {
+      const rrSq = rr * rr;
+      if (distSq > rrSq) {
         continue;
       }
+      const dist = Math.sqrt(distSq);
+      let nx: number;
+      let ny: number;
+      if (dist > 1e-4) {
+        nx = dx / dist;
+        ny = dy / dist;
+      } else {
+        nx = -e.facingX;
+        ny = -e.facingY;
+        const nlen = Math.hypot(nx, ny) || 1;
+        nx /= nlen;
+        ny /= nlen;
+      }
+      const overlap = rr - dist;
+      const push = overlap + ENEMY_CONTACT_SEPARATION_PAD;
+      e.x += nx * push;
+      e.y += ny * push;
+      const resolved = resolveCircleWithObstacles(e.x, e.y, e.radius, this.obstacles);
+      e.x = resolved.x;
+      e.y = resolved.y;
+      this._clampEnemyInWorld(e);
+
       if (this.gameTime - e.lastHitPlayerAt < CONTACT_DAMAGE_INTERVAL) {
         continue;
       }

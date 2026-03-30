@@ -2,7 +2,7 @@
  * 升级弹窗可选卡片池：标题/描述、稀有度档位（E～SSS）与效果；每次升级从未重复抽取 `pickCount` 张（池不足则全展示）
  */
 
-/** 单张卡片如何改局内属性（由 `SurvivorGameModel.applyLevelUpChoice` 解释） */
+/** 单张卡片如何改局内属性（由 `SurvivorGameModel.applyLevelUpChoice` 与宝箱随机奖励共用） */
 export type LevelUpCardEffect =
   | { kind: 'damageMult'; factor: number }
   | { kind: 'moveSpeedMult'; factor: number }

@@ -2,12 +2,13 @@
  * 玩家档案：成就 + 累计统计；本地持久化与单局结算写入
  */
 import { ACHIEVEMENT_FIRST_CLEAR_SURVIVAL_SEC, type AchievementId } from './achievementDefs';
+import { computeRunMerit } from './meritFormula';
 
 const STORAGE_KEY = 'app_game_achievements_v1';
 
-/** 当前存档结构（schema 2 在 v1 基础上增加时长与局数） */
+/** 当前存档结构（schema 3 增加累计军功，见阶段 5.1） */
 export interface PlayerProfileSave {
-  schemaVersion: 2;
+  schemaVersion: 3;
   /** 所有局累计击杀 */
   totalKills: number;
   /** 累计阵亡次数（每次 game over 结算记 1） */
@@ -20,30 +21,34 @@ export interface PlayerProfileSave {
   totalSessions: number;
   /** 单局最长存活（秒） */
   bestSurvivalSec: number;
+  /** 累计军功（每局阵亡结算按 `computeRunMerit` 累加） */
+  totalMerit: number;
 }
 
 /** @deprecated 与 `PlayerProfileSave` 同义，成就页历史引用 */
 export type AchievementSaveV1 = PlayerProfileSave;
 
 const defaultSave = (): PlayerProfileSave => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   totalKills: 0,
   deathCount: 0,
   firstClearEver: false,
   totalPlayTimeSec: 0,
   totalSessions: 0,
   bestSurvivalSec: 0,
+  totalMerit: 0,
 });
 
-function normalizeV2(o: Partial<PlayerProfileSave>): PlayerProfileSave {
+function normalizeV3(o: Partial<PlayerProfileSave>): PlayerProfileSave {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     totalKills: Math.max(0, Math.floor(Number(o.totalKills) || 0)),
     deathCount: Math.max(0, Math.floor(Number(o.deathCount) || 0)),
     firstClearEver: Boolean(o.firstClearEver),
     totalPlayTimeSec: Math.max(0, Number(o.totalPlayTimeSec) || 0),
     totalSessions: Math.max(0, Math.floor(Number(o.totalSessions) || 0)),
     bestSurvivalSec: Math.max(0, Number(o.bestSurvivalSec) || 0),
+    totalMerit: Math.max(0, Math.floor(Number(o.totalMerit) || 0)),
   };
 }
 
@@ -59,18 +64,26 @@ export function loadAchievementSave(): PlayerProfileSave {
     }
     const o = JSON.parse(raw) as Record<string, unknown>;
     const ver = Number(o.schemaVersion);
+    if (ver === 3) {
+      return normalizeV3(o as Partial<PlayerProfileSave>);
+    }
     if (ver === 2) {
-      return normalizeV2(o as Partial<PlayerProfileSave>);
+      const m = normalizeV3(o as Partial<PlayerProfileSave>);
+      m.totalMerit = 0;
+      m.schemaVersion = 3;
+      persist(m);
+      return m;
     }
     if (ver === 1) {
       const migrated: PlayerProfileSave = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         totalKills: Math.max(0, Math.floor(Number(o.totalKills) || 0)),
         deathCount: Math.max(0, Math.floor(Number(o.deathCount) || 0)),
         firstClearEver: Boolean(o.firstClearEver),
         totalPlayTimeSec: 0,
         totalSessions: 0,
         bestSurvivalSec: 0,
+        totalMerit: 0,
       };
       persist(migrated);
       return migrated;
@@ -131,6 +144,8 @@ export function recordRunEndForAchievements(params: {
     save.deathCount += 1;
   }
   const surv = Math.max(0, Number(params.survivalSec) || 0);
+  const meritGain = computeRunMerit(surv, k);
+  save.totalMerit += meritGain;
   save.totalPlayTimeSec += surv;
   save.totalSessions += 1;
   if (surv > save.bestSurvivalSec) {
@@ -151,8 +166,9 @@ export function recordRunEndForAchievements(params: {
 export function getAchievementProgressSummary(save: PlayerProfileSave): {
   totalKills: number;
   deathCount: number;
+  totalMerit: number;
 } {
-  return { totalKills: save.totalKills, deathCount: save.deathCount };
+  return { totalKills: save.totalKills, deathCount: save.deathCount, totalMerit: save.totalMerit };
 }
 
 /** 供数据统计页：结构化数值 */
@@ -163,6 +179,7 @@ export function getPlayerStatsSnapshot(save = loadAchievementSave()): {
   totalKills: number;
   deathCount: number;
   avgSurvivalSec: number;
+  totalMerit: number;
 } {
   const n = save.totalSessions;
   const avgSurvivalSec = n > 0 ? save.totalPlayTimeSec / n : 0;
@@ -173,5 +190,6 @@ export function getPlayerStatsSnapshot(save = loadAchievementSave()): {
     totalKills: save.totalKills,
     deathCount: save.deathCount,
     avgSurvivalSec,
+    totalMerit: save.totalMerit,
   };
 }

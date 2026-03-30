@@ -6,11 +6,11 @@
 export type EnemyKind = 'infantry' | 'puppet' | 'dog' | 'cavalry' | 'mg' | 'artillery' | 'officer';
 
 /**
- * 同种一批的站位策略：均在地图边缘附近生成，向内推进
- * - `edge_random`：每只独立随机边与位置（原行为）
- * - `line_along_edge`：同一条边、沿边切向排成一条线
+ * 同种一批的站位策略：均在玩家周围环带内生成（见 `ENEMY_SPAWN_RING_*`），敌人仍朝玩家推进
+ * - `edge_random`：每只独立随机角度与距离
+ * - `line_along_edge`：环上一切向线段排成一条线
  * - `tight_cluster`：同一锚点附近小范围散布
- * - `v_shape`：锚点 + 向内的 V 字展开（适合 3 只及以上）
+ * - `v_shape`：锚点 + 朝向玩家的 V 字展开（适合 3 只及以上）
  */
 export type EnemySpawnFormation = 'edge_random' | 'line_along_edge' | 'tight_cluster' | 'v_shape';
 

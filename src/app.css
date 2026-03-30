@@ -1,0 +1,36 @@
+@import 'tailwindcss';
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family:
+    'Microsoft YaHei',
+    'PingFang SC',
+    'Noto Sans SC',
+    system-ui,
+    sans-serif;
+}
+
+#root {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/** 非局内路由：React 壳层接收点击；局内由画布接收 */
+#root.shell-interactive {
+  pointer-events: auto;
+}
+
+#pixi-game-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  touch-action: none;
+}

@@ -4,6 +4,14 @@
 /** 方形无缝大世界边长（逻辑单位）；相机跟随玩家，边缘仍软边界防止飞出 */
 export const WORLD_SIZE = 6000;
 
+/**
+ * 刷怪距玩家的环带（世界单位）：过小易贴脸，过大则像地图边刷一样久看不到怪；`CAMERA_VIEW_WORLD_ON_SHORT_SIDE` 约 505，环带略超出屏幕边缘以保持压境感
+ */
+export const ENEMY_SPAWN_RING_MIN_DIST = 300;
+
+/** 与 `ENEMY_SPAWN_RING_MIN_DIST` 配对，随机落点在该距离区间内 */
+export const ENEMY_SPAWN_RING_MAX_DIST = 560;
+
 /** 障碍矩形数量目标（随机放置，可能略少） */
 export const WORLD_OBSTACLE_COUNT = 72;
 
@@ -61,6 +69,9 @@ export const OBSTACLE_PUSH_SLIDE_SPEED = 52;
 /** 接触伤害最小间隔（秒），避免每帧多段伤害 */
 export const CONTACT_DAMAGE_INTERVAL = 0.45;
 
+/** 与玩家重叠时沿「玩家→敌」方向额外推开的距离（世界单位），避免怪贴脸叠在一起 */
+export const ENEMY_CONTACT_SEPARATION_PAD = 5;
+
 /** 经验宝石 */
 export const GEM_RADIUS = 7;
 
@@ -71,6 +82,24 @@ export const GEM_MERGE_RADIUS = 38;
 
 /** 场上 `gems` 数组长度硬上限；超出时将经验并入距掉落点最近的宝石，避免数组与绘制无限增长 */
 export const GEM_MAX_ON_FIELD = 200;
+
+/** 宝箱：与玩家拾取圆叠加判定的半径（世界单位） */
+export const CHEST_RADIUS = 18;
+
+/** 设计文档：每 5 分钟刷新一只宝箱（局内逻辑秒，暂停时不累计） */
+export const CHEST_SPAWN_INTERVAL_SEC = 300;
+
+/** 地道入口：碰撞/绘制用半径（世界单位） */
+export const TUNNEL_ENTRANCE_RADIUS = 20;
+
+/** 设计文档：进入地道后隐身秒数；期间敌人不追击且不对玩家造成接触/远程伤害 */
+export const TUNNEL_STEALTH_SEC = 3;
+
+/** 首只地道入口在局内第几秒可生成（逻辑秒） */
+export const TUNNEL_FIRST_SPAWN_SEC = 96;
+
+/** 使用入口后，下一只入口最早出现的间隔（逻辑秒）；入口单次使用即消失 */
+export const TUNNEL_RESPAWN_AFTER_USE_SEC = 200;
 
 /** 升级所需经验：线性增长，后续可换表 */
 export function xpToReachNextLevel(level: number): number {

@@ -96,3 +96,9 @@ export interface XpGem {
   y: number;
   value: number;
 }
+
+/** 地图可拾取宝箱：靠近后与宝石同拾取半径叠加判定，开启时随机应用一张升级池卡片效果 */
+export interface WorldChest {
+  x: number;
+  y: number;
+}
