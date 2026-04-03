@@ -1,20 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { HashRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
 
+import {
+  closePauseEquipmentOverlay,
+  registerPauseEquipmentUi,
+} from '../game/meta/gamePauseBridge';
 import { GameScreen } from '../screens/GameScreen';
 import { PixiEmptyScreen } from '../screens/PixiEmptyScreen';
 import { navigation } from '../utils/navigation';
-import { AchievementsPage } from './AchievementsPage';
-import { CodexPage } from './CodexPage';
-import { HomePage } from './HomePage';
-import { SettingsPage } from './SettingsPage';
+import { EquipmentPage } from './EquipmentPage';
 import { bindReactNavigate } from './shellBridge';
-import { StatsPage } from './StatsPage';
-
-/** `/game` 路由占位：画面由 Pixi `GameScreen` 绘制，此处不渲染 DOM */
-function GameRoutePlaceholder(): null {
-  return null;
-}
+import { PageTransitionStack } from './PageTransitionStack';
 
 /** 同步路由与 Pixi 主屏、根节点指针穿透（局内交给画布） */
 function ShellSync(): null {
@@ -48,19 +44,36 @@ function ShellSync(): null {
   return null;
 }
 
+/** 局内暂停时叠在画布之上的装备整备层（不卸载 `GameScreen`） */
+function GamePauseEquipmentLayer(): JSX.Element | null {
+  const loc = useLocation();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    registerPauseEquipmentUi(setOpen);
+    return () => registerPauseEquipmentUi(null);
+  }, []);
+  useEffect(() => {
+    if (loc.pathname !== '/game') {
+      setOpen(false);
+    }
+  }, [loc.pathname]);
+  if (loc.pathname !== '/game' || !open) {
+    return null;
+  }
+  return (
+    <div className="game-pause-equipment-layer">
+      <EquipmentPage mode="battlePause" onCloseBattle={closePauseEquipmentOverlay} />
+    </div>
+  );
+}
+
 /** Hash 路由壳：`/game` 仅切换 Pixi，其余为 React 页面 */
 export function App(): JSX.Element {
   return (
     <HashRouter>
       <ShellSync />
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/codex" element={<CodexPage />} />
-        <Route path="/stats" element={<StatsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/achievements" element={<AchievementsPage />} />
-        <Route path="/game" element={<GameRoutePlaceholder />} />
-      </Routes>
+      <GamePauseEquipmentLayer />
+      <PageTransitionStack />
     </HashRouter>
   );
 }

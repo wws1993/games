@@ -4,39 +4,56 @@ import { useNavigate } from 'react-router-dom';
 import { getPlayerStatsSnapshot, loadAchievementSave } from '../game/meta/achievementStore';
 import { formatDurationCn } from '../utils/formatDuration';
 
-/** 累计作战时长、击杀、局数等（读 `PlayerProfileSave`） */
+/** 单条统计卡片：标签 + 展示值（时长类可能换行） */
+type StatsMetricRow = {
+  id: string;
+  label: string;
+  value: string;
+  /** 占满一行（如较长说明性数值） */
+  wide?: boolean;
+};
+
+/** 累计作战时长、击杀、局数等；布局为暖色底 + 指标宫格 + 说明脚注 */
 export function StatsPage(): JSX.Element {
   const navigate = useNavigate();
-  const bodyText = useMemo(() => {
+  const metrics = useMemo((): StatsMetricRow[] => {
     const s = getPlayerStatsSnapshot(loadAchievementSave());
-    const lines = [
-      `累计军功：${s.totalMerit}`,
-      `累计作战时长：${formatDurationCn(s.totalPlayTimeSec)}`,
-      `累计结算局数：${s.totalSessions}`,
-      `累计击杀：${s.totalKills}`,
-      `累计阵亡：${s.deathCount}`,
-      `单局最长存活：${formatDurationCn(s.bestSurvivalSec)}`,
-      `平均每局存活：${formatDurationCn(s.avgSurvivalSec)}`,
-      '',
-      '说明：仅在战斗结束并点击返回首页时结算本局数据（含军功）。',
+    return [
+      { id: 'play', label: '累计作战时长', value: formatDurationCn(s.totalPlayTimeSec), wide: true },
+      { id: 'sessions', label: '累计结算局数', value: String(s.totalSessions) },
+      { id: 'kills', label: '累计击杀', value: String(s.totalKills) },
+      { id: 'deaths', label: '累计阵亡', value: String(s.deathCount) },
+      { id: 'best', label: '单局最长存活', value: formatDurationCn(s.bestSurvivalSec), wide: true },
+      { id: 'avg', label: '平均每局存活', value: formatDurationCn(s.avgSurvivalSec), wide: true },
     ];
-    return lines.join('\n');
   }, []);
 
   return (
-    <div className="flex h-full min-h-0 flex-col items-center justify-center bg-[#0c0806]/93 p-4">
-      <div className="w-full max-w-md rounded-2xl border-2 border-[#6a5840] bg-gradient-to-b from-[#2c241c] to-[#1a1410] px-5 py-6 shadow-lg">
-        <h1 className="text-center text-[28px] font-bold text-[#f5e6d3]">数据统计</h1>
-        <p className="mt-5 whitespace-pre-wrap text-left text-base leading-7 text-[#d8ccb8]">{bodyText}</p>
-        <div className="mt-8 flex justify-center">
-          <button
-            type="button"
-            className="rounded-full border-2 border-[#5a4020] bg-[#e8c878] px-8 py-2.5 text-xl font-bold text-[#2a1a0a]"
-            onClick={() => void navigate('/')}
-          >
-            返回
-          </button>
-        </div>
+    <div className="page page-stats">
+      <header className="stats-header">
+        <h1 className="stats-header-title">数据统计</h1>
+        <p className="stats-header-sub">累计与单局表现；仅在战斗结束并返回首页时结算本局。</p>
+      </header>
+      <div className="page-scroll stats-body">
+        <ul className="stats-grid">
+          {metrics.map((m) => (
+            <li
+              key={m.id}
+              className={`stats-metric ${m.wide ? 'stats-metric--wide' : ''}`}
+            >
+              <p className="stats-metric-label">{m.label}</p>
+              <p className="stats-metric-value">{m.value}</p>
+            </li>
+          ))}
+        </ul>
+        <aside className="stats-note">
+          说明：紫箱装备在拾取时入库；在「装备」页穿戴九部位后，词条聚合作用于局内。
+        </aside>
+      </div>
+      <div className="page-bottom-bar">
+        <button type="button" className="page-btn-primary" onClick={() => void navigate('/')}>
+          返回
+        </button>
       </div>
     </div>
   );

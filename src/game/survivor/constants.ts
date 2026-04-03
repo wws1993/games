@@ -23,8 +23,24 @@ export const WORLD_SPAWN_CLEAR_RADIUS = 280;
  */
 export const CAMERA_VIEW_WORLD_ON_SHORT_SIDE = 505;
 
+/**
+ * 场上存活敌数量不低于此值时，局内对单敌改用极简矢量剪影，避免每怪每帧大量 `Graphics.clear` + 复杂路径（怪海时主要瓶颈之一）
+ */
+export const ENEMY_VISUAL_LOD_COUNT = 52;
+
 /** 设计移速 3 u/s × 缩放 ≈ 局内手感（像素级世界坐标） */
 export const PLAYER_MOVE_SCALE = 55;
+
+/** 冲刺冷却基准（秒），再乘升级卡 `dashCooldownMult`（小于 1 为缩短） */
+export const PLAYER_DASH_BASE_COOLDOWN_SEC = 2.35;
+
+/** 冲刺位移持续（秒），此段内以冲刺速度积分，再乘升级卡 `dashSpeedMult` 为有效冲刺速度 */
+export const PLAYER_DASH_BASE_DURATION_SEC = 0.125;
+
+/**
+ * 冲刺相对普通行走的速度倍率（与 `PLAYER_BASE_SPEED * PLAYER_MOVE_SCALE * 移速倍率` 相乘后再乘 `dashSpeedMult`）
+ */
+export const PLAYER_DASH_REL_SPEED = 3.35;
 
 /** 玩家基础移速（文档 3.0 单位/秒） */
 export const PLAYER_BASE_SPEED = 3;
@@ -69,6 +85,11 @@ export const OBSTACLE_PUSH_SLIDE_SPEED = 52;
 /** 接触伤害最小间隔（秒），避免每帧多段伤害 */
 export const CONTACT_DAMAGE_INTERVAL = 0.45;
 
+/**
+ * 受击后短无敌窗口（秒）基准值；由升级卡 `hurtInvincibleMult` 叠乘；与 `CONTACT_DAMAGE_INTERVAL` 独立（弹伤/接触均走此窗口）
+ */
+export const PLAYER_HURT_INVINCIBLE_BASE_SEC = 0.32;
+
 /** 与玩家重叠时沿「玩家→敌」方向额外推开的距离（世界单位），避免怪贴脸叠在一起 */
 export const ENEMY_CONTACT_SEPARATION_PAD = 5;
 
@@ -86,8 +107,14 @@ export const GEM_MAX_ON_FIELD = 200;
 /** 宝箱：与玩家拾取圆叠加判定的半径（世界单位） */
 export const CHEST_RADIUS = 18;
 
-/** 设计文档：每 5 分钟刷新一只宝箱（局内逻辑秒，暂停时不累计） */
-export const CHEST_SPAWN_INTERVAL_SEC = 300;
+/** 角色附近周期性宝箱刷新间隔（局内秒） */
+export const CHEST_SPAWN_INTERVAL_SEC = 30;
+
+/** 宝箱生成后未拾取的存在时间（局内秒），超时消失 */
+export const CHEST_LIFETIME_SEC = 20;
+
+/** 击杀敌人时基础掉落装备宝箱概率；随 `monsterLevel` 略升（见 `SurvivorGameModel`） */
+export const GEAR_CHEST_DROP_BASE_CHANCE = 0.042;
 
 /** 地道入口：碰撞/绘制用半径（世界单位） */
 export const TUNNEL_ENTRANCE_RADIUS = 20;

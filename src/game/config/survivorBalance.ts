@@ -15,6 +15,8 @@ export interface SurvivorBalanceConfig {
    */
   enemy: {
     moveSpeedScale: number;
+    /** 敌机枪弹 / 炮弹飞行速度 ×（表内 `projSpeed` 基准再乘此项，便于整体降弹速） */
+    projectileSpeedScale: number;
   };
 }
 
@@ -24,9 +26,12 @@ export const survivorBalance: SurvivorBalanceConfig = {
     maxRange: 420,
   },
   spawn: {
-    intervalScale: 1.5,
+    /** 在表基准上再放慢约 30% 刷怪（原 1.5 × 1/0.7） */
+    intervalScale: 1.5 / 0.7,
   },
   enemy: {
-    moveSpeedScale: 0.65,
+    /** 在表基准上再 ×0.7 怪物地面移速（原 0.65 × 0.7） */
+    moveSpeedScale: 0.65 * 0.7,
+    projectileSpeedScale: 0.72,
   },
 };

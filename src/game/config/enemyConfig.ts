@@ -3,7 +3,26 @@
  */
 
 /** 可参与加权的兵种键（与 `stats`、`spawnByKind` 必须一致） */
-export type EnemyKind = 'infantry' | 'puppet' | 'dog' | 'cavalry' | 'mg' | 'artillery' | 'officer';
+export type EnemyKind =
+  | 'infantry'
+  | 'puppet'
+  | 'dog'
+  | 'cavalry'
+  | 'mg'
+  | 'artillery'
+  | 'officer'
+  /** 陆军扩展 */
+  | 'sniper'
+  | 'grenadier'
+  | 'engineer'
+  | 'heavy_infantry'
+  | 'scout_car'
+  /** 空军扩展：飞行单位通常 `ignoresObstacles`，越障追击 */
+  | 'recon_plane'
+  | 'fighter_plane'
+  | 'bomber_plane'
+  | 'gunship'
+  | 'paratrooper';
 
 /**
  * 同种一批的站位策略：均在玩家周围环带内生成（见 `ENEMY_SPAWN_RING_*`），敌人仍朝玩家推进
@@ -24,6 +43,8 @@ export interface EnemyStatConfig {
   contactDamage: number;
   /** 相对 `GEM_XP_VALUE` 的倍率 */
   gemMultiplier: number;
+  /** 为 true 时移动不与矩形障碍碰撞（飞行等） */
+  ignoresObstacles?: boolean;
   ranged?: {
     type: 'mg' | 'shell';
     damage: number;
@@ -61,61 +82,61 @@ export interface EnemyGameConfig {
   curve: EnemySpawnCurveConfig;
 }
 
-/** 默认表：与设计文档时间轴 0–3、3–5… 分钟解锁一致，远程补全 `attackRange` */
+/** 默认表：节奏偏快、兵种更丰富；空军较晚解锁 */
 export const enemyGameConfig: EnemyGameConfig = {
   stats: {
     infantry: {
       radius: 12,
-      baseHp: 32,
-      speed: 78,
+      baseHp: 30,
+      speed: 82,
       contactDamage: 10,
       gemMultiplier: 1,
     },
     puppet: {
       radius: 11,
-      baseHp: 18,
-      speed: 52,
+      baseHp: 16,
+      speed: 56,
       contactDamage: 5,
       gemMultiplier: 0.85,
     },
     dog: {
       radius: 8,
-      baseHp: 14,
-      speed: 132,
+      baseHp: 13,
+      speed: 138,
       contactDamage: 8,
       gemMultiplier: 0.9,
     },
     cavalry: {
       radius: 14,
-      baseHp: 42,
-      speed: 108,
+      baseHp: 40,
+      speed: 112,
       contactDamage: 15,
       gemMultiplier: 1.1,
     },
     mg: {
       radius: 13,
-      baseHp: 95,
-      speed: 34,
+      baseHp: 88,
+      speed: 36,
       contactDamage: 8,
       gemMultiplier: 1.2,
       ranged: {
         type: 'mg',
         damage: 12,
-        cooldownSec: 1.12,
+        cooldownSec: 1.08,
         attackRange: 520,
         projSpeed: 340,
       },
     },
     artillery: {
       radius: 15,
-      baseHp: 220,
-      speed: 20,
+      baseHp: 200,
+      speed: 22,
       contactDamage: 6,
       gemMultiplier: 1.5,
       ranged: {
         type: 'shell',
         damage: 20,
-        cooldownSec: 2.35,
+        cooldownSec: 2.2,
         attackRange: 640,
         projSpeed: 155,
         shellBlastRadius: 56,
@@ -123,60 +144,232 @@ export const enemyGameConfig: EnemyGameConfig = {
     },
     officer: {
       radius: 14,
-      baseHp: 300,
-      speed: 70,
+      baseHp: 280,
+      speed: 74,
       contactDamage: 25,
       gemMultiplier: 10,
+    },
+    sniper: {
+      radius: 11,
+      baseHp: 44,
+      speed: 60,
+      contactDamage: 12,
+      gemMultiplier: 1.12,
+      ranged: {
+        type: 'mg',
+        damage: 17,
+        cooldownSec: 1.45,
+        attackRange: 600,
+        projSpeed: 420,
+      },
+    },
+    grenadier: {
+      radius: 12,
+      baseHp: 52,
+      speed: 64,
+      contactDamage: 14,
+      gemMultiplier: 1.08,
+      ranged: {
+        type: 'shell',
+        damage: 14,
+        cooldownSec: 1.85,
+        attackRange: 420,
+        projSpeed: 140,
+        shellBlastRadius: 40,
+      },
+    },
+    engineer: {
+      radius: 11,
+      baseHp: 36,
+      speed: 92,
+      contactDamage: 11,
+      gemMultiplier: 1,
+    },
+    heavy_infantry: {
+      radius: 13,
+      baseHp: 110,
+      speed: 48,
+      contactDamage: 18,
+      gemMultiplier: 1.22,
+    },
+    scout_car: {
+      radius: 16,
+      baseHp: 140,
+      speed: 102,
+      contactDamage: 21,
+      gemMultiplier: 1.32,
+    },
+    recon_plane: {
+      radius: 10,
+      baseHp: 26,
+      speed: 152,
+      contactDamage: 9,
+      gemMultiplier: 0.92,
+      ignoresObstacles: true,
+    },
+    fighter_plane: {
+      radius: 11,
+      baseHp: 50,
+      speed: 132,
+      contactDamage: 15,
+      gemMultiplier: 1.18,
+      ignoresObstacles: true,
+      ranged: {
+        type: 'mg',
+        damage: 9,
+        cooldownSec: 0.82,
+        attackRange: 460,
+        projSpeed: 380,
+      },
+    },
+    bomber_plane: {
+      radius: 13,
+      baseHp: 180,
+      speed: 58,
+      contactDamage: 7,
+      gemMultiplier: 1.38,
+      ignoresObstacles: true,
+      ranged: {
+        type: 'shell',
+        damage: 18,
+        cooldownSec: 2.05,
+        attackRange: 560,
+        projSpeed: 148,
+        shellBlastRadius: 50,
+      },
+    },
+    gunship: {
+      radius: 12,
+      baseHp: 135,
+      speed: 78,
+      contactDamage: 12,
+      gemMultiplier: 1.48,
+      ignoresObstacles: true,
+      ranged: {
+        type: 'mg',
+        damage: 13,
+        cooldownSec: 0.58,
+        attackRange: 440,
+        projSpeed: 320,
+      },
+    },
+    paratrooper: {
+      radius: 11,
+      baseHp: 34,
+      speed: 118,
+      contactDamage: 10,
+      gemMultiplier: 1.02,
+      ignoresObstacles: true,
     },
   },
   spawnByKind: {
     infantry: {
       unlockAfterSec: 0,
-      spawnWeight: 3,
-      batchSize: 2,
+      spawnWeight: 3.2,
+      batchSize: 3,
       formation: 'edge_random',
     },
     puppet: {
       unlockAfterSec: 0,
-      spawnWeight: 2,
+      spawnWeight: 2.4,
       batchSize: 2,
       formation: 'line_along_edge',
     },
-    dog: {
-      unlockAfterSec: 180,
+    engineer: {
+      unlockAfterSec: 0,
       spawnWeight: 2,
       batchSize: 2,
       formation: 'tight_cluster',
     },
+    dog: {
+      unlockAfterSec: 90,
+      spawnWeight: 2.2,
+      batchSize: 2,
+      formation: 'tight_cluster',
+    },
+    sniper: {
+      unlockAfterSec: 120,
+      spawnWeight: 1.4,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
+    grenadier: {
+      unlockAfterSec: 150,
+      spawnWeight: 1.3,
+      batchSize: 1,
+      formation: 'v_shape',
+    },
+    heavy_infantry: {
+      unlockAfterSec: 200,
+      spawnWeight: 1.5,
+      batchSize: 2,
+      formation: 'line_along_edge',
+    },
     cavalry: {
-      unlockAfterSec: 300,
+      unlockAfterSec: 240,
       spawnWeight: 2,
       batchSize: 2,
       formation: 'v_shape',
     },
-    mg: {
-      unlockAfterSec: 420,
+    scout_car: {
+      unlockAfterSec: 270,
       spawnWeight: 1.2,
       batchSize: 1,
       formation: 'edge_random',
     },
+    mg: {
+      unlockAfterSec: 300,
+      spawnWeight: 1.35,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
+    recon_plane: {
+      unlockAfterSec: 180,
+      spawnWeight: 1.5,
+      batchSize: 2,
+      formation: 'tight_cluster',
+    },
+    fighter_plane: {
+      unlockAfterSec: 330,
+      spawnWeight: 1.25,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
+    paratrooper: {
+      unlockAfterSec: 210,
+      spawnWeight: 1.6,
+      batchSize: 2,
+      formation: 'v_shape',
+    },
+    gunship: {
+      unlockAfterSec: 390,
+      spawnWeight: 0.95,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
+    bomber_plane: {
+      unlockAfterSec: 450,
+      spawnWeight: 0.85,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
     officer: {
-      unlockAfterSec: 480,
-      spawnWeight: 0.55,
+      unlockAfterSec: 360,
+      spawnWeight: 0.6,
       batchSize: 1,
       formation: 'edge_random',
     },
     artillery: {
-      unlockAfterSec: 600,
-      spawnWeight: 0.65,
+      unlockAfterSec: 420,
+      spawnWeight: 0.72,
       batchSize: 1,
       formation: 'edge_random',
     },
   },
   curve: {
-    rampSec: 540,
-    intervalStartSec: 0.72,
-    intervalEndSec: 0.1,
+    rampSec: 300,
+    intervalStartSec: 0.42,
+    intervalEndSec: 0.055,
   },
 };
 
@@ -184,9 +377,19 @@ export const enemyGameConfig: EnemyGameConfig = {
 export const ENEMY_KIND_ORDER: readonly EnemyKind[] = [
   'infantry',
   'puppet',
+  'engineer',
   'dog',
+  'sniper',
+  'grenadier',
+  'heavy_infantry',
   'cavalry',
+  'scout_car',
   'mg',
+  'recon_plane',
+  'fighter_plane',
+  'paratrooper',
+  'gunship',
+  'bomber_plane',
   'officer',
   'artillery',
 ];

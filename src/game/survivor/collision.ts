@@ -77,6 +77,68 @@ export function resolveCircleWithObstacles(
   return { x: cx, y: cy };
 }
 
+/** 圆与障碍重叠时推出 AABB 外并按接触面法向镜面反射速度；未重叠返回 null；用于玩家子弹障碍反弹 */
+export function resolveBulletObstacleBounce(
+  bx: number,
+  by: number,
+  bulletRadius: number,
+  vx: number,
+  vy: number,
+  o: Obstacle,
+): { x: number; y: number; vx: number; vy: number } | null {
+  if (!circleAabbOverlap(bx, by, bulletRadius, o)) {
+    return null;
+  }
+  // 先分离，避免圆心在矩形内时法向退化
+  const p = pushCircleOutOfAabb(bx, by, bulletRadius, o);
+  const cx = p.x;
+  const cy = p.y;
+  const l = o.x;
+  const t = o.y;
+  const rgt = o.x + o.w;
+  const btm = o.y + o.h;
+  // 矩形上距圆心最近点；指向圆心的向量即外法向（从障碍指向外）
+  const qx = Math.max(l, Math.min(cx, rgt));
+  const qy = Math.max(t, Math.min(cy, btm));
+  let nx = cx - qx;
+  let ny = cy - qy;
+  const nlen2 = nx * nx + ny * ny;
+  if (nlen2 < 1e-12) {
+    // 角点或数值退化：按到四边最短距离取轴法向
+    const dl = cx - l;
+    const dr = rgt - cx;
+    const dtop = cy - t;
+    const db = btm - cy;
+    const m = Math.min(dl, dr, dtop, db);
+    if (m === dl) {
+      nx = -1;
+      ny = 0;
+    } else if (m === dr) {
+      nx = 1;
+      ny = 0;
+    } else if (m === dtop) {
+      nx = 0;
+      ny = -1;
+    } else {
+      nx = 0;
+      ny = 1;
+    }
+  } else {
+    const inv = 1 / Math.sqrt(nlen2);
+    nx *= inv;
+    ny *= inv;
+  }
+  // v' = v - 2 (v·n) n，仅当朝向障碍内侧（v·n<0）时翻转
+  const dot = vx * nx + vy * ny;
+  let nvx = vx;
+  let nvy = vy;
+  if (dot < 0) {
+    nvx -= 2 * dot * nx;
+    nvy -= 2 * dot * ny;
+  }
+  return { x: cx, y: cy, vx: nvx, vy: nvy };
+}
+
 /** 玩家普通子弹（圆形）是否被障碍挡住；`ignoresObstacles` 为 true 时（如手榴弹）恒 false */
 export function playerBulletBlockedByObstacles(
   bx: number,

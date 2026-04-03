@@ -1,8 +1,11 @@
 import {
   CONTACT_DAMAGE_INTERVAL,
   ENEMY_CONTACT_SEPARATION_PAD,
+  PLAYER_HURT_INVINCIBLE_BASE_SEC,
   CHEST_RADIUS,
+  CHEST_LIFETIME_SEC,
   CHEST_SPAWN_INTERVAL_SEC,
+  GEAR_CHEST_DROP_BASE_CHANCE,
   GEM_MAX_ON_FIELD,
   GEM_MERGE_RADIUS,
   GEM_RADIUS,
@@ -13,6 +16,9 @@ import {
   ENEMY_ANIM_PHASE_PER_MOVE_SPEED,
   PLAYER_BASE_SPEED,
   PLAYER_MOVE_SCALE,
+  PLAYER_DASH_BASE_COOLDOWN_SEC,
+  PLAYER_DASH_BASE_DURATION_SEC,
+  PLAYER_DASH_REL_SPEED,
   PLAYER_RADIUS,
   PLAYER_BASE_CRIT_CHANCE,
   OBSTACLE_PUSH_CHARGE_SEC,
@@ -32,18 +38,40 @@ import {
 import {
   circleAabbOverlap,
   obstaclePlacementValid,
-  playerBulletBlockedByObstacles,
+  resolveBulletObstacleBounce,
   pushCircleOutOfAabb,
   resolveCircleWithObstacles,
 } from './collision';
 import { generateObstacles } from './obstacleGen';
 import { getSpawnBatchSize, getSpawnFormation, type EnemySpawnFormation } from '../config/enemyConfig';
 import {
+  CHEST_BUFF_DEFS,
+  pickRandomChestBuffKind,
+  type ChestBuffKind,
+} from '../config/chestBuffs';
+import type { PurpleChestBundle } from '../config/gearAffixConfig';
+import {
+  aggregatePurpleProfileBonuses,
+  emptyPurpleProfileBonuses,
+  type PurpleProfileBonuses,
+} from '../config/purpleGearBonuses';
+import { DEFAULT_PLAYER_WEAPON_KIND } from '../config/playerWeaponsConfig';
+import { applyPurpleChestLoot, getEquippedPurplePiecesOrdered } from '../meta/achievementStore';
+import {
+  PLAYER_WEAPON_DEFS,
+  PLAYER_WEAPON_ORDER,
+  type PlayerWeaponKind,
+} from '../config/playerWeaponsConfig';
+import {
   LEVEL_UP_PUSH_CARD_ID,
-  levelUpCardPool,
+  LEVEL_UP_REVIVE_CARD_ID,
+  levelUpCardTemplates,
   levelUpPickCount,
+  materializeLevelUpCard,
   type LevelUpCardDef,
+  type LevelUpCardTemplate,
 } from '../config/levelUpCardsConfig';
+import type { GameModeId } from '../config/gameModeConfig';
 import { survivorBalance } from '../config/survivorBalance';
 import { getDevBonusMaxHp, getDevBonusRifleAttackSpeed } from '../meta/devRuntime';
 import {
@@ -64,14 +92,36 @@ export class SurvivorGameModel {
   /** 玩家世界坐标 Y */
   public playerY = 0;
 
-  /** 上一有效移动方向 X（归一化），供左右翻转；无移动时保持最后值 */
+  /** 上一有效移动方向 X（归一化），供躯干左右镜像；无移动时保持最后值 */
   public playerFacingX = 1;
 
   /** 上一有效移动方向 Y（归一化） */
   public playerFacingY = 0;
 
+  /** 步枪指向 X（归一化）：每帧朝射程内最近敌人；无目标时与 `playerFacing` 一致 */
+  public playerAimX = 1;
+
+  /** 步枪指向 Y（归一化） */
+  public playerAimY = 0;
+
   /** 本帧是否产生位移输入（用于 walk / idle 表现） */
   public playerMoving = false;
+
+  /** 冲刺冷却剩余（秒）；为 0 时可再次冲刺 */
+  public dashCooldownLeft = 0;
+
+  /** 当前是否处于冲刺位移段（用于表现等） */
+  public get playerDashing(): boolean {
+    return this._dashBurstLeft > 1e-6;
+  }
+
+  /** 冲刺剩余时间（秒） */
+  private _dashBurstLeft = 0;
+
+  /** 冲刺方向单位向量 */
+  private _dashDirX = 1;
+
+  private _dashDirY = 0;
 
   /** 当前生命 */
   public playerHp = PLAYER_BASE_MAX_HP;
@@ -90,6 +140,14 @@ export class SurvivorGameModel {
 
   /** 步枪每轮发射子弹数（扇形散布） */
   public rifleBulletCount = 1;
+
+  /** `PLAYER_WEAPON_ORDER` 下标；默认 0 为三八式 */
+  public playerWeaponIndex = 0;
+
+  /** 当前武器键（与图鉴、`PLAYER_WEAPON_DEFS` 一致） */
+  public get equippedWeaponKind(): PlayerWeaponKind {
+    return PLAYER_WEAPON_ORDER[this.playerWeaponIndex]!;
+  }
 
   /** 步枪暴击几率 0～1：`PLAYER_BASE_CRIT_CHANCE` 与「暴击Ⅰ」等卡片累加后封顶 1 */
   public critChance = PLAYER_BASE_CRIT_CHANCE;
@@ -118,6 +176,86 @@ export class SurvivorGameModel {
   /** 拾取范围（文档初始 50，阶段 1 仅用于宝石） */
   public pickupRadius = PLAYER_BASE_PICKUP_RADIUS;
 
+  /** 档案九部位紫装词条提供的承伤乘子，与 `chestBuffDamageTakenMult` 相乘后结算弹伤与接触伤 */
+  public profileDamageTakenMult = 1;
+
+  /** 升级卡护甲加算：最终承伤再乘 `100/(100+armor)` */
+  public armorAdd = 0;
+
+  /** 经验倍率：升级卡、紫装词条等叠乘在 `chestBuffXpGainMult` 上 */
+  public expMult = 1;
+
+  /** 影响装备箱额外掉落概率等，乘性并设上限避免爆炸；升级卡「金币」亦叠乘在此 */
+  public luckMult = 1;
+
+  /** 拾取距离倍率：`(pickupRadius + 宝箱加算 + 判定半径) * 倍率` */
+  public pickupRangeMult = 1;
+
+  /** 步枪吸血加算，与 `chestBuffLifestealRatio` 相加后对命中伤害转治疗 */
+  public lifestealAdd = 0;
+
+  /** 闪避率加算 0～1，受击前判定；成功则免伤且不进入无敌帧 */
+  public dodgeChanceAdd = 0;
+
+  /** 本局仍拥有一次复活（选过「复活」卡且未消耗） */
+  public hasRevive = false;
+
+  /** 已获得「复活」卡时本局三选一池不再出现该模板 */
+  private _reviveOfferTaken = false;
+
+  /** 步枪穿透额外次数（加在武器表 `pierceExtra` 上） */
+  public projectilePierceAdd = 0;
+
+  /** 接触推开敌人距离倍率 */
+  public knockbackMult = 1;
+
+  /** 升级卡秒回，与 `chestBuffHpRegenPerSec` 并行 */
+  public regenAdd = 0;
+
+  /**
+   * 反伤倍率叠乘；反射量 = 实际掉血 × max(0, thornsDamageMult - 1)；无卡时为 1 不反伤
+   */
+  public thornsDamageMult = 1;
+
+  /** 步枪子弹速度倍率（叠在武器 `bulletSpeedMult` 上） */
+  public rifleBulletSpeedMult = 1;
+
+  /** 击杀敌人固定回血 */
+  public killHealAdd = 0;
+
+  /** 冲刺冷却倍率（小于 1 缩短冷却）；冲刺系统接入后读取 */
+  public dashCooldownMult = 1;
+
+  /** 子弹反弹次数加算；与障碍碰撞时消耗，见 `Bullet.obstacleBouncesRemaining` */
+  public projectileBounceAdd = 0;
+
+  /** 步枪伤害倍率（叠在全局 `damageMultiplier` 与宝箱伤增上） */
+  public rifleDamageMult = 1;
+
+  /** 档案紫装词条提供的弹径乘子，叠在武器与金色宝箱上 */
+  public profileBulletRadiusMult = 1;
+
+  /** 步枪暴击率加算，与全局暴击率、宝箱暴击加算后封顶 1 */
+  public rifleCritChanceAdd = 0;
+
+  /** 步枪换弹速度倍率（越大冷却越短），叠在 `rifleAttackSpeedMult` 上 */
+  public rifleReloadSpeedMult = 1;
+
+  /** 冲刺位移速度倍率（冲刺系统接入后读取） */
+  public dashSpeedMult = 1;
+
+  /** 受伤后短无敌时长倍率，叠在 `PLAYER_HURT_INVINCIBLE_BASE_SEC` 上 */
+  public hurtInvincibleMult = 1;
+
+  /** 玩家生命 ≤30% 时步枪伤害倍率 */
+  public lowHpDamageMult = 1;
+
+  /** 暴击命中时额外吸血率（加在基础吸血上） */
+  public critLifestealAdd = 0;
+
+  /** 受击无敌截止 `gameTime` */
+  private _playerHurtInvincibleUntil = 0;
+
   /** 当前等级（从 1 开始） */
   public level = 1;
 
@@ -139,10 +277,13 @@ export class SurvivorGameModel {
   /** 是否因升级弹窗暂停 */
   public paused = false;
 
+  /** 是否因局内打开装备整备层而暂停（与升级弹窗互斥） */
+  public manualPaused = false;
+
   /** 是否等待玩家三选一 */
   public awaitingLevelUp = false;
 
-  /** 当前弹窗展示的升级卡片（与 `levelUpCardsConfig` 中对象同一引用） */
+  /** 当前弹窗展示的升级卡片（由 `materializeLevelUpCard` 按本局等级生成） */
   public readonly pendingLevelUpCards: LevelUpCardDef[] = [];
 
   /** 是否已阵亡 */
@@ -150,6 +291,9 @@ export class SurvivorGameModel {
 
   /** 本局累计击杀（回首页结算成就时上报） */
   public sessionKills = 0;
+
+  /** 开局由 `GameScreen` 写入，影响 `pickSpawnKind` 权重 */
+  public gameMode: GameModeId = 'standard';
 
   public readonly enemies: Enemy[] = [];
 
@@ -172,6 +316,51 @@ export class SurvivorGameModel {
   /** 宝箱提示剩余显示时间（秒），由 `GameScreen` 每帧扣减 */
   public chestToastRemain = 0;
 
+  /** 最近一次拾取紫箱的九件随机装备（供 HUD 多行或将来详情 UI；新局 `reset` 清空） */
+  public lastPurpleChestBundle: PurpleChestBundle | null = null;
+
+  /** 本局每次拾取紫箱的完整掉落（阵亡结算仅用于结算界面统计；装备已在拾取时入库） */
+  public readonly sessionPurpleChestBundles: PurpleChestBundle[] = [];
+
+  /** 当前帧宝箱限时增益聚合：由 `_tickChestBuffs` / `_applyChestBuff` 刷新 */
+  public chestBuffBulletRadiusMult = 1;
+
+  /** 主角矢量缩放乘子（仅表现） */
+  public chestBuffPlayerScaleMult = 1;
+
+  /** 叠在 `moveSpeedMultiplier` 上再乘 */
+  public chestBuffMoveSpeedMult = 1;
+
+  /** 受击伤害再乘算 */
+  public chestBuffDamageTakenMult = 1;
+
+  /** 叠在暴击率上（命中时再与 `critChance` 相加并封顶 1） */
+  public chestBuffCritChanceBonus = 0;
+
+  /** 拾取圈半径加算 */
+  public chestBuffPickupRadiusAdd = 0;
+
+  /** 步枪冷却时间再乘算 */
+  public chestBuffRifleCooldownMult = 1;
+
+  /** 步枪单发基础伤害再乘算（叠在 `damageMultiplier` 上） */
+  public chestBuffDamageDealtMult = 1;
+
+  /** 秒回复生命 */
+  public chestBuffHpRegenPerSec = 0;
+
+  /** 吸收经验宝石时再乘 */
+  public chestBuffXpGainMult = 1;
+
+  /** 步枪命中伤害转化为治疗的比例 */
+  public chestBuffLifestealRatio = 0;
+
+  /** 未过期的宝箱道具；同 `kind` 再次拾取只刷新 `until` */
+  private readonly _activeChestBuffs: { kind: ChestBuffKind; until: number }[] = [];
+
+  /** 宝箱增益列表本帧是否发生变更；仅变更时重算聚合，避免每帧全量遍历 */
+  private _chestBuffAggregateDirty = true;
+
   /** 静态矩形障碍：挡人、挡怪、挡玩家普通子弹；不挡 `ignoresObstacles` 弹体 */
   public readonly obstacles: Obstacle[] = [];
 
@@ -190,7 +379,90 @@ export class SurvivorGameModel {
   /** 本帧哪些桶非空，供下一帧开头 O(用过桶数) 清空 */
   private readonly _bulletHitGridUsed: number[] = [];
 
+  /** 本帧已计算的步枪索敌结果，供瞄准与开火复用，避免同帧重复全量扫描敌人 */
+  private _rifleFocusTargetCache: Enemy | undefined = undefined;
+
+  /** `_rifleFocusTargetCache` 是否已在本帧求值（包括求值结果为 `undefined`） */
+  private _rifleFocusTargetCached = false;
+
   private _nextEnemyId = 1;
+
+  /** 局内主武器列表（无军功商店时仅默认步枪）；Q/E 在此列表循环 */
+  private _ownedWeaponsOrdered: PlayerWeaponKind[] = [DEFAULT_PLAYER_WEAPON_KIND];
+
+  /** 本局已叠乘的紫装词条聚合，供 `syncGearLoadoutFromProfileMidRun` 卸装 */
+  private _appliedPurpleBonuses: PurpleProfileBonuses | null = null;
+
+  /** 档案紫装提供的步枪索敌射程加算（世界单位） */
+  public profileRifleRangeAdd = 0;
+
+  /**
+   * 从本地档案同步拥有列表与当前装备（`GameScreen.prepare` 在 `reset` 后调用）
+   */
+  public syncWeaponLoadoutFromProfile(): void {
+    this._ownedWeaponsOrdered = [DEFAULT_PLAYER_WEAPON_KIND];
+    this.playerWeaponIndex = 0;
+  }
+
+  /**
+   * 将档案中九部位紫装词条加成写入本局（在 `reset` 与 `syncWeaponLoadoutFromProfile` 之后调用）
+   */
+  public syncGearLoadoutFromProfile(): void {
+    const b = aggregatePurpleProfileBonuses(getEquippedPurplePiecesOrdered());
+    this.profileDamageTakenMult = b.damageTakenMult;
+    if (b.maxHpAdd > 0) {
+      this.playerMaxHp += b.maxHpAdd;
+      this.playerHp += b.maxHpAdd;
+    }
+    this.moveSpeedMultiplier *= b.moveSpeedMult;
+    this.critChance = Math.min(1, Math.max(0, this.critChance + b.critChanceAdd));
+    this.pickupRadius += b.pickupRadiusAdd;
+    this.rifleAttackSpeedMult *= b.rifleAttackSpeedMult;
+    this.rifleDamageMult *= b.rifleDamageMult;
+    this.profileBulletRadiusMult *= b.bulletRadiusMult;
+    this.regenAdd += b.regenAdd;
+    this.expMult *= b.expMult;
+    this.profileRifleRangeAdd += b.rifleRangeAdd;
+    this.luckMult *= b.luckMult;
+    this._appliedPurpleBonuses = { ...b };
+  }
+
+  /**
+   * 局内整备后重算紫装：先卸旧词条再叠新（与升级卡、宝箱乘子共存）
+   */
+  public syncGearLoadoutFromProfileMidRun(): void {
+    const old = this._appliedPurpleBonuses ?? emptyPurpleProfileBonuses();
+    const neu = aggregatePurpleProfileBonuses(getEquippedPurplePiecesOrdered());
+    const safeDiv = (cur: number, d: number): number => (Number.isFinite(d) && d > 1e-9 ? cur / d : cur);
+    this.profileDamageTakenMult = safeDiv(this.profileDamageTakenMult, old.damageTakenMult) * neu.damageTakenMult;
+    const hpOld = old.maxHpAdd;
+    if (hpOld > 0) {
+      this.playerMaxHp -= hpOld;
+      this.playerHp -= hpOld;
+    }
+    const hpNew = neu.maxHpAdd;
+    if (hpNew > 0) {
+      this.playerMaxHp += hpNew;
+      this.playerHp += hpNew;
+    }
+    this.playerHp = Math.min(this.playerHp, this.playerMaxHp);
+    this.playerHp = Math.max(0, this.playerHp);
+    this.moveSpeedMultiplier = safeDiv(this.moveSpeedMultiplier, old.moveSpeedMult) * neu.moveSpeedMult;
+    this.critChance -= old.critChanceAdd;
+    this.critChance = Math.min(1, Math.max(0, this.critChance + neu.critChanceAdd));
+    this.pickupRadius -= old.pickupRadiusAdd;
+    this.pickupRadius += neu.pickupRadiusAdd;
+    this.rifleAttackSpeedMult = safeDiv(this.rifleAttackSpeedMult, old.rifleAttackSpeedMult) * neu.rifleAttackSpeedMult;
+    this.rifleDamageMult = safeDiv(this.rifleDamageMult, old.rifleDamageMult) * neu.rifleDamageMult;
+    this.profileBulletRadiusMult = safeDiv(this.profileBulletRadiusMult, old.bulletRadiusMult) * neu.bulletRadiusMult;
+    this.regenAdd -= old.regenAdd;
+    this.regenAdd += neu.regenAdd;
+    this.expMult = safeDiv(this.expMult, old.expMult) * neu.expMult;
+    this.profileRifleRangeAdd -= old.rifleRangeAdd;
+    this.profileRifleRangeAdd += neu.rifleRangeAdd;
+    this.luckMult = safeDiv(this.luckMult, old.luckMult) * neu.luckMult;
+    this._appliedPurpleBonuses = { ...neu };
+  }
 
   /**
    * 重置新一局：地图中心出生、清空实体、时间归零
@@ -201,6 +473,8 @@ export class SurvivorGameModel {
     this.playerY = half;
     this.playerFacingX = 1;
     this.playerFacingY = 0;
+    this.playerAimX = 1;
+    this.playerAimY = 0;
     this.playerMoving = false;
     const bonusHp = getDevBonusMaxHp();
     this.playerMaxHp = PLAYER_BASE_MAX_HP + bonusHp;
@@ -209,6 +483,8 @@ export class SurvivorGameModel {
     this.moveSpeedMultiplier = 1;
     this.rifleAttackSpeedMult = 1 + getDevBonusRifleAttackSpeed();
     this.rifleBulletCount = 1;
+    this._ownedWeaponsOrdered = [DEFAULT_PLAYER_WEAPON_KIND];
+    this.playerWeaponIndex = 0;
     this.critChance = PLAYER_BASE_CRIT_CHANCE;
     this.critOnHitDamageMult = 1;
     this.canPushObstacles = false;
@@ -218,6 +494,37 @@ export class SurvivorGameModel {
     this._obstaclePushChargeT = 0;
     this._obstaclePushDomKey = null;
     this.pickupRadius = PLAYER_BASE_PICKUP_RADIUS;
+    this.profileDamageTakenMult = 1;
+    this.armorAdd = 0;
+    this.expMult = 1;
+    this.luckMult = 1;
+    this.pickupRangeMult = 1;
+    this.lifestealAdd = 0;
+    this.dodgeChanceAdd = 0;
+    this.hasRevive = false;
+    this._reviveOfferTaken = false;
+    this.projectilePierceAdd = 0;
+    this.knockbackMult = 1;
+    this.regenAdd = 0;
+    this.thornsDamageMult = 1;
+    this.rifleBulletSpeedMult = 1;
+    this.killHealAdd = 0;
+    this.dashCooldownMult = 1;
+    this.projectileBounceAdd = 0;
+    this.rifleDamageMult = 1;
+    this.profileBulletRadiusMult = 1;
+    this.profileRifleRangeAdd = 0;
+    this.rifleCritChanceAdd = 0;
+    this.rifleReloadSpeedMult = 1;
+    this.dashSpeedMult = 1;
+    this.hurtInvincibleMult = 1;
+    this.lowHpDamageMult = 1;
+    this.critLifestealAdd = 0;
+    this._playerHurtInvincibleUntil = 0;
+    this.dashCooldownLeft = 0;
+    this._dashBurstLeft = 0;
+    this._dashDirX = 1;
+    this._dashDirY = 0;
     this.level = 1;
     this.xp = 0;
     this.gameTime = 0;
@@ -225,6 +532,7 @@ export class SurvivorGameModel {
     this.spawnTimer = 0.18;
     this.spawnInterval = SPAWN_INTERVAL_START_SEC;
     this.paused = false;
+    this.manualPaused = false;
     this.awaitingLevelUp = false;
     this.pendingLevelUpCards.length = 0;
     this.gameOver = false;
@@ -237,6 +545,11 @@ export class SurvivorGameModel {
     this._nextChestSpawnGameTime = CHEST_SPAWN_INTERVAL_SEC;
     this.chestToastTitle = '';
     this.chestToastRemain = 0;
+    this.lastPurpleChestBundle = null;
+    this.sessionPurpleChestBundles.length = 0;
+    this._activeChestBuffs.length = 0;
+    this._chestBuffAggregateDirty = true;
+    this._recomputeChestBuffAggregates();
     this._nextEnemyId = 1;
     this.obstacles.length = 0;
     this.obstacles.push(
@@ -252,17 +565,44 @@ export class SurvivorGameModel {
   }
 
   /**
+   * 键盘 Q/E 循环切换主武器；阵亡、暂停、升级三选一时不切换
+   * @param delta - -1 上一把、+1 下一把
+   */
+  public cycleWeapon(delta: number): void {
+    if (delta === 0 || this.gameOver || this.paused || this.manualPaused || this.awaitingLevelUp) {
+      return;
+    }
+    const list = this._ownedWeaponsOrdered;
+    if (list.length <= 1) {
+      return;
+    }
+    const cur = this.equippedWeaponKind;
+    let i = list.indexOf(cur);
+    if (i < 0) {
+      i = 0;
+    }
+    const n = list.length;
+    const nextKind = list[(i + delta + n) % n]!;
+    const gi = PLAYER_WEAPON_ORDER.indexOf(nextKind);
+    this.playerWeaponIndex = gi >= 0 ? gi : 0;
+  }
+
+  /**
    * 单帧推进：输入移动、刷怪、索敌射击、弹道、碰撞、拾取与升级检测
    * @param dt - 帧间隔（秒）
    * @param input - 键盘合成方向
    */
   public step(dt: number, input: MoveInput): void {
-    if (this.gameOver || this.paused) {
+    if (this.gameOver || this.paused || this.manualPaused) {
       return;
     }
 
+    this._rifleFocusTargetCache = undefined;
+    this._rifleFocusTargetCached = false;
     this._lastFrameDt = dt;
     this.gameTime += dt;
+    this._pruneWorldChestsExpired();
+    this._tickChestBuffs();
     const scale = survivorBalance.spawn.intervalScale;
     const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
     this.spawnInterval = Math.max(0.04, spawnIntervalForTime(this.gameTime) * safeScale);
@@ -272,6 +612,7 @@ export class SurvivorGameModel {
     this._clampPlayerToMap();
     this._updateObstaclePushCharge(dt);
     this._resolvePlayerVsObstacles();
+    this._updatePlayerAimDirection();
     this._rifleTick(dt);
     this._integrateBullets(dt);
     this._cullPlayerBulletsInObstacles();
@@ -281,6 +622,8 @@ export class SurvivorGameModel {
     this._enemyProjectileHits();
     this._bulletEnemyHits();
     this._enemyPlayerContact();
+    this._applyChestBuffHpRegen(dt);
+    this._applyLevelUpCardRegen(dt);
     this._chestSpawnTick();
     this._pickupGems();
     this._pickupChests();
@@ -307,7 +650,7 @@ export class SurvivorGameModel {
     this._checkLevelUpFromXp();
   }
 
-  /** 将单张升级卡数值写入局内状态（升级三选一与宝箱共用，不触暂停） */
+  /** 将单张升级卡数值写入局内状态（升级三选一；不触暂停） */
   private _applyLevelUpCardEffect(card: LevelUpCardDef): void {
     const ef = card.effect;
     if (ef.kind === 'damageMult') {
@@ -328,42 +671,230 @@ export class SurvivorGameModel {
       this.critOnHitDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
     } else if (ef.kind === 'pushObstacles') {
       this.canPushObstacles = true;
+    } else if (ef.kind === 'armorAdd') {
+      this.armorAdd += ef.add;
+    } else if (ef.kind === 'expMult') {
+      const f = ef.factor;
+      this.expMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'coinMult') {
+      const f = ef.factor;
+      this.luckMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'luckMult') {
+      const f = ef.factor;
+      this.luckMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'pickupRangeMult') {
+      const f = ef.factor;
+      this.pickupRangeMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'lifestealAdd') {
+      this.lifestealAdd += ef.add;
+    } else if (ef.kind === 'dodgeChanceAdd') {
+      this.dodgeChanceAdd = Math.min(1, Math.max(0, this.dodgeChanceAdd + ef.add));
+    } else if (ef.kind === 'revive') {
+      this.hasRevive = true;
+      this._reviveOfferTaken = true;
+    } else if (ef.kind === 'projectilePierceAdd') {
+      this.projectilePierceAdd += ef.add;
+    } else if (ef.kind === 'knockbackMult') {
+      const f = ef.factor;
+      this.knockbackMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'regenAdd') {
+      this.regenAdd += ef.add;
+    } else if (ef.kind === 'thornsDamageMult') {
+      const f = ef.factor;
+      this.thornsDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'rifleBulletSpeedMult') {
+      const f = ef.factor;
+      this.rifleBulletSpeedMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'killHealAdd') {
+      this.killHealAdd += ef.add;
+    } else if (ef.kind === 'dashCooldownMult') {
+      const f = ef.factor;
+      this.dashCooldownMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'projectileBounceAdd') {
+      this.projectileBounceAdd += ef.add;
+    } else if (ef.kind === 'rifleDamageMult') {
+      const f = ef.factor;
+      this.rifleDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'rifleCritChanceAdd') {
+      this.rifleCritChanceAdd = Math.min(1, Math.max(0, this.rifleCritChanceAdd + ef.add));
+    } else if (ef.kind === 'rifleReloadSpeedMult') {
+      const f = ef.factor;
+      this.rifleReloadSpeedMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'dashSpeedMult') {
+      const f = ef.factor;
+      this.dashSpeedMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'hurtInvincibleMult') {
+      const f = ef.factor;
+      this.hurtInvincibleMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'lowHpDamageMult') {
+      const f = ef.factor;
+      this.lowHpDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
+    } else if (ef.kind === 'critLifestealAdd') {
+      this.critLifestealAdd += ef.add;
     }
   }
 
-  /** 与 `_rollLevelUpCards` 相同过滤规则（已持有推箱子则剔除该卡） */
-  private _eligibleLevelUpPool(): LevelUpCardDef[] {
-    return levelUpCardPool.filter(
-      (c) => !(c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles),
+  /** 与 `_rollLevelUpCards` 相同过滤规则（已持有推箱子 / 已拿过复活卡则剔除对应模板） */
+  private _eligibleLevelUpPool(): LevelUpCardTemplate[] {
+    return levelUpCardTemplates.filter(
+      (c) =>
+        !(c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles) &&
+        !(c.id === LEVEL_UP_REVIVE_CARD_ID && this._reviveOfferTaken),
     );
   }
 
-  /** 宝箱奖励：池中均匀随机一张 */
-  private _pickRandomChestReward(): LevelUpCardDef | null {
-    const pool = this._eligibleLevelUpPool();
-    if (pool.length === 0) {
-      return null;
+  /** `despawnAt` 到期的地图宝箱移除 */
+  private _pruneWorldChestsExpired(): void {
+    const t = this.gameTime;
+    for (let i = this.chests.length - 1; i >= 0; i--) {
+      if (t >= this.chests[i]!.despawnAt) {
+        this.chests.splice(i, 1);
+      }
     }
-    return pool[Math.floor(Math.random() * pool.length)]!;
   }
 
-  /** 到达 `gameTime` 里程碑时尝试在障碍外、距玩家与已有宝箱足够远处刷一只；大 dt 时按间隔递进避免漏刷 */
+  /** 移除过期宝箱增益并刷新聚合字段 */
+  private _tickChestBuffs(): void {
+    const t = this.gameTime;
+    const arr = this._activeChestBuffs;
+    let removed = false;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i]!.until <= t) {
+        arr.splice(i, 1);
+        removed = true;
+      }
+    }
+    if (removed) {
+      this._chestBuffAggregateDirty = true;
+    }
+    if (this._chestBuffAggregateDirty) {
+      this._recomputeChestBuffAggregates();
+      this._chestBuffAggregateDirty = false;
+    }
+  }
+
+  /** 由 `_activeChestBuffs` 重算本帧可用的乘子与加算 */
+  private _recomputeChestBuffAggregates(): void {
+    let bulletM = 1;
+    let playerSc = 1;
+    let moveM = 1;
+    let dmgTakenM = 1;
+    let critAdd = 0;
+    let pickupAdd = 0;
+    let rifleCdM = 1;
+    let dmgDealM = 1;
+    let regen = 0;
+    let xpM = 1;
+    let lifeSteal = 0;
+    for (const row of this._activeChestBuffs) {
+      const d = CHEST_BUFF_DEFS[row.kind];
+      if (d.bulletRadiusMult != null) {
+        bulletM *= d.bulletRadiusMult;
+      }
+      if (d.playerScaleMult != null) {
+        playerSc *= d.playerScaleMult;
+      }
+      if (d.moveSpeedMult != null) {
+        moveM *= d.moveSpeedMult;
+      }
+      if (d.damageTakenMult != null) {
+        dmgTakenM *= d.damageTakenMult;
+      }
+      if (d.critChanceAdd != null) {
+        critAdd += d.critChanceAdd;
+      }
+      if (d.pickupRadiusAdd != null) {
+        pickupAdd += d.pickupRadiusAdd;
+      }
+      if (d.rifleCooldownMult != null) {
+        rifleCdM *= d.rifleCooldownMult;
+      }
+      if (d.damageDealtMult != null) {
+        dmgDealM *= d.damageDealtMult;
+      }
+      if (d.hpRegenPerSec != null) {
+        regen += d.hpRegenPerSec;
+      }
+      if (d.xpGainMult != null) {
+        xpM *= d.xpGainMult;
+      }
+      if (d.lifestealRatio != null) {
+        lifeSteal += d.lifestealRatio;
+      }
+    }
+    const pos = (x: number, fb: number): number =>
+      Number.isFinite(x) && x > 0 ? x : fb;
+    this.chestBuffBulletRadiusMult = pos(bulletM, 1);
+    this.chestBuffPlayerScaleMult = pos(playerSc, 1);
+    this.chestBuffMoveSpeedMult = pos(moveM, 1);
+    this.chestBuffDamageTakenMult = pos(dmgTakenM, 1);
+    this.chestBuffCritChanceBonus = Number.isFinite(critAdd) ? Math.max(0, critAdd) : 0;
+    this.chestBuffPickupRadiusAdd = Number.isFinite(pickupAdd) ? Math.max(0, pickupAdd) : 0;
+    this.chestBuffRifleCooldownMult = pos(rifleCdM, 1);
+    this.chestBuffDamageDealtMult = pos(dmgDealM, 1);
+    this.chestBuffHpRegenPerSec = Number.isFinite(regen) ? Math.max(0, regen) : 0;
+    this.chestBuffXpGainMult = pos(xpM, 1);
+    this.chestBuffLifestealRatio = Number.isFinite(lifeSteal) ? Math.max(0, lifeSteal) : 0;
+  }
+
+  /** 拾取宝箱道具：同种刷新持续时间 */
+  private _applyChestBuff(kind: ChestBuffKind): void {
+    const def = CHEST_BUFF_DEFS[kind];
+    const until = this.gameTime + def.durationSec;
+    const arr = this._activeChestBuffs;
+    const idx = arr.findIndex((r) => r.kind === kind);
+    if (idx >= 0) {
+      arr[idx]!.until = until;
+    } else {
+      arr.push({ kind, until });
+    }
+    this._chestBuffAggregateDirty = true;
+    this._recomputeChestBuffAggregates();
+    this._chestBuffAggregateDirty = false;
+  }
+
+  /** 野战绷带等持续回复 */
+  private _applyChestBuffHpRegen(dt: number): void {
+    const r = this.chestBuffHpRegenPerSec;
+    if (r <= 0 || !Number.isFinite(r)) {
+      return;
+    }
+    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + r * dt);
+  }
+
+  /** 升级卡「慢慢回血」等：与宝箱秒回并行 */
+  private _applyLevelUpCardRegen(dt: number): void {
+    const r = this.regenAdd;
+    if (r <= 0 || !Number.isFinite(r)) {
+      return;
+    }
+    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + r * dt);
+  }
+
+  /** 拾取圈 + 宝石/箱判定半径，乘 `pickupRangeMult` */
+  private _pickupInteractionReach(extra: number): number {
+    const base = this.pickupRadius + this.chestBuffPickupRadiusAdd + extra;
+    const m = Number.isFinite(this.pickupRangeMult) && this.pickupRangeMult > 0 ? this.pickupRangeMult : 1;
+    return base * m;
+  }
+
+  /** 到达 `gameTime` 里程碑时在玩家附近环带刷一只限时宝箱；大 dt 按间隔递进避免漏刷 */
   private _chestSpawnTick(): void {
-    const margin = 130;
     const m = WORLD_SIZE;
-    const minFromPlayerSq = 220 * 220;
+    const margin = CHEST_RADIUS + 8;
     const minChestSepSq = 95 * 95;
+    const ringMin = 72;
+    const ringMax = 145;
     while (this.gameTime >= this._nextChestSpawnGameTime) {
       this._nextChestSpawnGameTime += CHEST_SPAWN_INTERVAL_SEC;
-      for (let attempt = 0; attempt < 64; attempt++) {
-        const rx = margin + Math.random() * (m - 2 * margin);
-        const ry = margin + Math.random() * (m - 2 * margin);
+      for (let attempt = 0; attempt < 72; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = ringMin + Math.random() * (ringMax - ringMin);
+        let rx = this.playerX + Math.cos(ang) * dist;
+        let ry = this.playerY + Math.sin(ang) * dist;
+        rx = Math.min(m - margin, Math.max(margin, rx));
+        ry = Math.min(m - margin, Math.max(margin, ry));
         const sp = this._spawnPositionClearOfObstacles(rx, ry, CHEST_RADIUS);
-        const dx = sp.x - this.playerX;
-        const dy = sp.y - this.playerY;
-        if (dx * dx + dy * dy < minFromPlayerSq) {
-          continue;
-        }
         let ok = true;
         for (const ch of this.chests) {
           const sx = sp.x - ch.x;
@@ -376,15 +907,20 @@ export class SurvivorGameModel {
         if (!ok) {
           continue;
         }
-        this.chests.push({ x: sp.x, y: sp.y });
+        this.chests.push({
+          x: sp.x,
+          y: sp.y,
+          despawnAt: this.gameTime + CHEST_LIFETIME_SEC,
+          chestKind: 'buff',
+        });
         break;
       }
     }
   }
 
-  /** 进入拾取范围则移除宝箱并立即应用随机强化（不弹三选一窗） */
+  /** 进入拾取范围则移除宝箱并应用随机限时道具（不弹三选一） */
   private _pickupChests(): void {
-    const reach = this.pickupRadius + CHEST_RADIUS;
+    const reach = this._pickupInteractionReach(CHEST_RADIUS);
     const reachSq = reach * reach;
     for (let i = this.chests.length - 1; i >= 0; i--) {
       const ch = this.chests[i]!;
@@ -394,10 +930,18 @@ export class SurvivorGameModel {
         continue;
       }
       this.chests.splice(i, 1);
-      const card = this._pickRandomChestReward();
-      if (card) {
-        this._applyLevelUpCardEffect(card);
-        this.chestToastTitle = card.title;
+      if (ch.chestKind === 'gear') {
+        const lv = ch.monsterLevel ?? 1;
+        const r = applyPurpleChestLoot(lv);
+        this.lastPurpleChestBundle = r.bundle;
+        this.sessionPurpleChestBundles.push(r.bundle);
+        this.chestToastTitle = r.toastFullText;
+        this.chestToastRemain = 6;
+      } else {
+        const kind = pickRandomChestBuffKind();
+        const def = CHEST_BUFF_DEFS[kind];
+        this._applyChestBuff(kind);
+        this.chestToastTitle = `${def.title} · ${def.durationSec}s`;
         this.chestToastRemain = 3.4;
       }
       this._checkLevelUpFromXp();
@@ -429,14 +973,15 @@ export class SurvivorGameModel {
    */
   private _rollLevelUpCards(): void {
     this.pendingLevelUpCards.length = 0;
-    const pool = this._eligibleLevelUpPool();
-    for (let i = pool.length - 1; i > 0; i--) {
+    const templates = this._eligibleLevelUpPool();
+    for (let i = templates.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+      [templates[i], templates[j]] = [templates[j]!, templates[i]!];
     }
-    const n = Math.min(levelUpPickCount, pool.length);
+    const lv = Math.max(1, this.level);
+    const n = Math.min(levelUpPickCount, templates.length);
     for (let k = 0; k < n; k++) {
-      this.pendingLevelUpCards.push(pool[k]!);
+      this.pendingLevelUpCards.push(materializeLevelUpCard(templates[k]!, lv));
     }
   }
 
@@ -446,7 +991,7 @@ export class SurvivorGameModel {
       return;
     }
     this.spawnTimer += this.spawnInterval;
-    const kind = pickSpawnKind(this.gameTime);
+    const kind = pickSpawnKind(this.gameTime, this.gameMode);
     const batch = getSpawnBatchSize(kind);
     const formation = getSpawnFormation(kind);
     this._spawnEnemyGroup(kind, batch, formation);
@@ -663,6 +1208,8 @@ export class SurvivorGameModel {
       rangedCd = def.ranged.cooldown * (0.35 + Math.random() * 0.5);
     }
 
+    const enemyLevel = Math.max(1, Math.floor(this.gameTime / 60) + 1);
+
     this.enemies.push({
       id: this._nextEnemyId++,
       kind,
@@ -680,16 +1227,16 @@ export class SurvivorGameModel {
       animPhase: Math.random() * Math.PI * 2,
       rangedCd,
       ranged,
+      ignoresObstacles: def.ignoresObstacles === true,
+      level: enemyLevel,
     });
   }
 
   /** 摇杆死区：低于此模长则改读键盘，避免漂移 */
   private static readonly _ANALOG_DEADZONE = 0.14;
 
-  /** 八方向或模拟向量归一化后乘以设计移速与倍率 */
-  private _playerMove(dt: number, input: MoveInput): void {
-    this._playerMoveStepX = 0;
-    this._playerMoveStepY = 0;
+  /** 摇杆/键盘合成归一化方向；无有效输入返回 null */
+  private _normalizedMoveDirFromInput(input: MoveInput): { x: number; y: number } | null {
     let dx = 0;
     let dy = 0;
     const ax = input.analogX;
@@ -716,18 +1263,100 @@ export class SurvivorGameModel {
       }
     }
     if (dx === 0 && dy === 0) {
+      return null;
+    }
+    const len = Math.hypot(dx, dy);
+    return { x: dx / len, y: dy / len };
+  }
+
+  /** 普通行走世界速度（单位/秒） */
+  private _walkSpeedWorldPerSec(): number {
+    return (
+      PLAYER_BASE_SPEED *
+      PLAYER_MOVE_SCALE *
+      this.moveSpeedMultiplier *
+      this.chestBuffMoveSpeedMult
+    );
+  }
+
+  /**
+   * 本帧开始冲刺：方向优先当前输入，否则用 `playerFacing`；并写入冷却与持续时间
+   */
+  private _tryStartDash(input: MoveInput): void {
+    const dir = this._normalizedMoveDirFromInput(input);
+    let nx: number;
+    let ny: number;
+    if (dir) {
+      nx = dir.x;
+      ny = dir.y;
+    } else {
+      const fx = this.playerFacingX;
+      const fy = this.playerFacingY;
+      const fl = Math.hypot(fx, fy);
+      if (fl > 1e-4) {
+        nx = fx / fl;
+        ny = fy / fl;
+      } else {
+        nx = 1;
+        ny = 0;
+      }
+    }
+    this._dashDirX = nx;
+    this._dashDirY = ny;
+    const dcm = Number.isFinite(this.dashCooldownMult) && this.dashCooldownMult > 0 ? this.dashCooldownMult : 1;
+    this.dashCooldownLeft = PLAYER_DASH_BASE_COOLDOWN_SEC * dcm;
+    this._dashBurstLeft = PLAYER_DASH_BASE_DURATION_SEC;
+  }
+
+  /** 八方向或模拟向量归一化后乘以设计移速；冲刺段覆盖普通行走并积分位移 */
+  private _playerMove(dt: number, input: MoveInput): void {
+    this._playerMoveStepX = 0;
+    this._playerMoveStepY = 0;
+    const walk = this._walkSpeedWorldPerSec();
+
+    if (this._dashBurstLeft <= 1e-6 && input.dash && this.dashCooldownLeft <= 0) {
+      this._tryStartDash(input);
+    }
+
+    if (this._dashBurstLeft > 1e-6) {
+      const stepDt = Math.min(dt, this._dashBurstLeft);
+      const dsm = Number.isFinite(this.dashSpeedMult) && this.dashSpeedMult > 0 ? this.dashSpeedMult : 1;
+      const spd = walk * PLAYER_DASH_REL_SPEED * dsm;
+      const sx = this._dashDirX * spd * stepDt;
+      const sy = this._dashDirY * spd * stepDt;
+      this.playerX += sx;
+      this.playerY += sy;
+      this._playerMoveStepX = sx;
+      this._playerMoveStepY = sy;
+      this.playerFacingX = this._dashDirX;
+      this.playerFacingY = this._dashDirY;
+      this.playerMoving = true;
+      this._dashBurstLeft -= dt;
+      if (this._dashBurstLeft < 0) {
+        this._dashBurstLeft = 0;
+      }
+      return;
+    }
+
+    if (this.dashCooldownLeft > 0) {
+      this.dashCooldownLeft -= dt;
+      if (this.dashCooldownLeft < 0) {
+        this.dashCooldownLeft = 0;
+      }
+    }
+
+    const nd = this._normalizedMoveDirFromInput(input);
+    if (!nd) {
       this.playerMoving = false;
       return;
     }
-    const len = Math.hypot(dx, dy);
-    dx /= len;
-    dy /= len;
+    const dx = nd.x;
+    const dy = nd.y;
     this.playerFacingX = dx;
     this.playerFacingY = dy;
     this.playerMoving = true;
-    const speed = PLAYER_BASE_SPEED * PLAYER_MOVE_SCALE * this.moveSpeedMultiplier;
-    const stepX = dx * speed * dt;
-    const stepY = dy * speed * dt;
+    const stepX = dx * walk * dt;
+    const stepY = dy * walk * dt;
     this.playerX += stepX;
     this.playerY += stepY;
     this._playerMoveStepX = stepX;
@@ -904,26 +1533,57 @@ export class SurvivorGameModel {
     this._clampPlayerToMap();
   }
 
-  /** 步枪等普通弹进入障碍体积则销毁；`ignoresObstacles` 弹体保留 */
+  /**
+   * 步枪等普通弹与土房障碍：有剩余反弹次数则镜面反弹并推出障碍外，否则销毁；`ignoresObstacles` 弹体不穿障判定
+   */
   private _cullPlayerBulletsInObstacles(): void {
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
+    const obs = this.obstacles;
+    outer: for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]!;
-      if (
-        playerBulletBlockedByObstacles(b.x, b.y, RIFLE_BULLET_RADIUS, b.ignoresObstacles, this.obstacles)
-      ) {
-        this.bullets.splice(i, 1);
+      if (b.ignoresObstacles) {
+        continue;
+      }
+      const br = b.hitRadius ?? RIFLE_BULLET_RADIUS;
+      for (let guard = 0; guard < 5; guard++) {
+        let hit: Obstacle | undefined;
+        for (const o of obs) {
+          if (circleAabbOverlap(b.x, b.y, br, o)) {
+            hit = o;
+            break;
+          }
+        }
+        if (!hit) {
+          continue outer;
+        }
+        const remaining = Math.max(0, Math.floor(b.obstacleBouncesRemaining ?? 0));
+        if (remaining <= 0) {
+          this.bullets.splice(i, 1);
+          continue outer;
+        }
+        const res = resolveBulletObstacleBounce(b.x, b.y, br, b.vx, b.vy, hit);
+        if (!res) {
+          this.bullets.splice(i, 1);
+          continue outer;
+        }
+        b.x = res.x;
+        b.y = res.y;
+        b.vx = res.vx;
+        b.vy = res.vy;
+        b.obstacleBouncesRemaining = remaining - 1;
       }
     }
   }
 
-  /** 冷却结束则朝射程内最近敌人发射一颗子弹 */
-  private _rifleTick(dt: number): void {
-    this.rifleCooldown -= dt;
-    if (this.rifleCooldown > 0) {
-      return;
+  /** 步枪射程内距离玩家最近的敌人；与 `_rifleTick`、瞄准表现共用 */
+  private _pickRifleFocusTarget(): Enemy | undefined {
+    if (this._rifleFocusTargetCached) {
+      return this._rifleFocusTargetCache;
     }
-    const maxR = survivorBalance.rifle.maxRange;
-    const rangeSq = (Number.isFinite(maxR) && maxR > 0 ? maxR : 420) ** 2;
+    const baseR = survivorBalance.rifle.maxRange;
+    const maxR =
+      (Number.isFinite(baseR) && baseR > 0 ? baseR : 420) +
+      (Number.isFinite(this.profileRifleRangeAdd) ? this.profileRifleRangeAdd : 0);
+    const rangeSq = maxR ** 2;
     let best: Enemy | undefined;
     let bestD2 = Infinity;
     for (const e of this.enemies) {
@@ -938,30 +1598,94 @@ export class SurvivorGameModel {
         best = e;
       }
     }
+    this._rifleFocusTargetCached = true;
+    this._rifleFocusTargetCache = best;
+    return best;
+  }
+
+  /** 每帧刷新 `playerAim`：有索敌目标则指向目标，否则回退为移动朝向 */
+  private _updatePlayerAimDirection(): void {
+    const best = this._pickRifleFocusTarget();
+    if (best) {
+      const dx0 = best.x - this.playerX;
+      const dy0 = best.y - this.playerY;
+      const len = Math.hypot(dx0, dy0);
+      if (len > 1e-4) {
+        this.playerAimX = dx0 / len;
+        this.playerAimY = dy0 / len;
+        return;
+      }
+    }
+    let ax = this.playerFacingX;
+    let ay = this.playerFacingY;
+    const m = Math.hypot(ax, ay);
+    if (m > 1e-4) {
+      ax /= m;
+      ay /= m;
+    } else {
+      ax = 1;
+      ay = 0;
+    }
+    this.playerAimX = ax;
+    this.playerAimY = ay;
+  }
+
+  /** 冷却结束则按当前武器表朝射程内最近敌人发射弹丸（多发扇形、穿透、着色由表驱动） */
+  private _rifleTick(dt: number): void {
+    this.rifleCooldown -= dt;
+    if (this.rifleCooldown > 0) {
+      return;
+    }
+    const best = this._pickRifleFocusTarget();
     if (!best) {
       this.rifleCooldown = 0;
       return;
     }
+    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
     const dx0 = best.x - this.playerX;
     const dy0 = best.y - this.playerY;
     const baseAng = Math.atan2(dy0, dx0);
     const asp = this.rifleAttackSpeedMult;
     const safeAsp = Number.isFinite(asp) && asp > 0 ? asp : 1;
-    const n = Math.max(1, Math.min(12, Math.floor(this.rifleBulletCount)));
-    const spread = 0.11;
+    const bonusPellets = Math.max(0, Math.floor(this.rifleBulletCount) - 1);
+    const n = Math.max(
+      1,
+      Math.min(12, Math.floor(w.baseBulletCount + bonusPellets)),
+    );
+    const spread = n <= 1 ? 0 : w.spreadRad;
+    const bsm = Number.isFinite(this.rifleBulletSpeedMult) && this.rifleBulletSpeedMult > 0 ? this.rifleBulletSpeedMult : 1;
+    const spd = RIFLE_BULLET_SPEED * w.bulletSpeedMult * bsm;
+    const pierce =
+      Math.max(0, Math.floor(w.pierceExtra)) + Math.max(0, Math.floor(this.projectilePierceAdd));
+    const hits0 = 1 + pierce;
+    const rdm = Number.isFinite(this.rifleDamageMult) && this.rifleDamageMult > 0 ? this.rifleDamageMult : 1;
+    const dmgPer =
+      RIFLE_BASE_DAMAGE * w.damageMult * this.damageMultiplier * this.chestBuffDamageDealtMult * rdm;
+    const pbr = Number.isFinite(this.profileBulletRadiusMult) && this.profileBulletRadiusMult > 0 ? this.profileBulletRadiusMult : 1;
+    const hitR =
+      RIFLE_BULLET_RADIUS * w.bulletRadiusMult * this.chestBuffBulletRadiusMult * pbr;
+    const bounce0 = Math.max(0, Math.floor(this.projectileBounceAdd));
     for (let i = 0; i < n; i++) {
       const ang = baseAng + (i - (n - 1) * 0.5) * spread;
-      const vx = Math.cos(ang) * RIFLE_BULLET_SPEED;
-      const vy = Math.sin(ang) * RIFLE_BULLET_SPEED;
+      const vx = Math.cos(ang) * spd;
+      const vy = Math.sin(ang) * spd;
       this.bullets.push({
         x: this.playerX,
         y: this.playerY,
         vx,
         vy,
-        damage: RIFLE_BASE_DAMAGE * this.damageMultiplier,
+        damage: dmgPer,
+        hitRadius: hitR,
+        hitsRemaining: hits0,
+        hitEnemyIds: [],
+        displayColor: w.bulletColor,
+        obstacleBouncesRemaining: bounce0,
       });
     }
-    this.rifleCooldown = RIFLE_COOLDOWN_SEC / safeAsp;
+    const cdScale = Number.isFinite(w.cooldownScale) && w.cooldownScale > 0 ? w.cooldownScale : 1;
+    const rlm = Number.isFinite(this.rifleReloadSpeedMult) && this.rifleReloadSpeedMult > 0 ? this.rifleReloadSpeedMult : 1;
+    this.rifleCooldown =
+      (RIFLE_COOLDOWN_SEC * cdScale * this.chestBuffRifleCooldownMult) / (safeAsp * rlm);
   }
 
   private _integrateBullets(dt: number): void {
@@ -986,9 +1710,11 @@ export class SurvivorGameModel {
       e.x += nx * e.moveSpeed * dt;
       e.y += ny * e.moveSpeed * dt;
       e.animPhase += dt * (ENEMY_ANIM_PHASE_BASE + e.moveSpeed * ENEMY_ANIM_PHASE_PER_MOVE_SPEED);
-      const p = resolveCircleWithObstacles(e.x, e.y, e.radius, this.obstacles);
-      e.x = p.x;
-      e.y = p.y;
+      if (!e.ignoresObstacles) {
+        const p = resolveCircleWithObstacles(e.x, e.y, e.radius, this.obstacles);
+        e.x = p.x;
+        e.y = p.y;
+      }
     }
   }
 
@@ -1098,14 +1824,93 @@ export class SurvivorGameModel {
     }
   }
 
-  /** 弹伤不额外分段，直接扣血；归零则结束 */
-  private _applyProjectileDamageToPlayer(amount: number): void {
-    this.playerHp -= amount;
+  /**
+   * 敌弹/爆炸基础伤害（未计护甲前由乘子缩放）；接触伤走 `_applyDamageToPlayer` 并传入反伤目标
+   * @param thornsTarget - 接触伤时传入该敌；弹伤无明确目标时反伤最近敌人
+   */
+  private _applyDamageToPlayer(raw: number, thornsTarget?: Enemy): void {
+    if (raw <= 0 || !Number.isFinite(raw)) {
+      return;
+    }
+    if (this.gameTime < this._playerHurtInvincibleUntil) {
+      return;
+    }
+    const dodgeCap = Math.min(1, Math.max(0, this.dodgeChanceAdd));
+    if (dodgeCap > 0 && Math.random() < dodgeCap) {
+      return;
+    }
+    let dmg = raw * this.chestBuffDamageTakenMult * this.profileDamageTakenMult;
+    const ar = this.armorAdd;
+    if (ar > 0 && Number.isFinite(ar)) {
+      dmg *= 100 / (100 + ar);
+    }
+    if (!Number.isFinite(dmg) || dmg <= 0) {
+      return;
+    }
+    const hpBefore = this.playerHp;
+    this.playerHp -= dmg;
+    const actualLoss = hpBefore - this.playerHp;
+    const invBase = PLAYER_HURT_INVINCIBLE_BASE_SEC;
+    const invMult =
+      Number.isFinite(this.hurtInvincibleMult) && this.hurtInvincibleMult > 0 ? this.hurtInvincibleMult : 1;
+    this._playerHurtInvincibleUntil = this.gameTime + invBase * invMult;
+    this._applyThornsReflect(actualLoss, thornsTarget);
     if (this.playerHp <= 0) {
+      if (this.hasRevive) {
+        this.hasRevive = false;
+        this.playerHp = this.playerMaxHp;
+        this._playerHurtInvincibleUntil = this.gameTime + Math.max(invBase * invMult * 2.2, 1.25);
+        return;
+      }
       this.playerHp = 0;
       this.gameOver = true;
       this.paused = true;
     }
+  }
+
+  /** 弹伤入口：无明确反伤目标时按最近敌反伤 */
+  private _applyProjectileDamageToPlayer(amount: number): void {
+    this._applyDamageToPlayer(amount, undefined);
+  }
+
+  /** 反伤：叠乘 `thornsDamageMult`，反射量 = 实际掉血 × max(0, mult - 1) */
+  private _applyThornsReflect(hpLoss: number, target?: Enemy): void {
+    const th = this.thornsDamageMult;
+    if (th <= 1 || hpLoss <= 0 || !Number.isFinite(hpLoss)) {
+      return;
+    }
+    const reflect = hpLoss * (th - 1);
+    if (reflect <= 0 || !Number.isFinite(reflect)) {
+      return;
+    }
+    let e = target;
+    if (!e || e.hp <= 0) {
+      e = this._nearestEnemyWithin(this.playerX, this.playerY, 540);
+    }
+    if (!e || e.hp <= 0) {
+      return;
+    }
+    e.hp -= reflect;
+    if (e.hp <= 0) {
+      this._onEnemyKilled(e);
+    }
+  }
+
+  /** 用于反伤弹伤：取距点最近且仍在场的敌人 */
+  private _nearestEnemyWithin(cx: number, cy: number, maxDist: number): Enemy | undefined {
+    const maxSq = maxDist * maxDist;
+    let best: Enemy | undefined;
+    let bestD2 = maxSq;
+    for (const e of this.enemies) {
+      const dx = e.x - cx;
+      const dy = e.y - cy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = e;
+      }
+    }
+    return best;
   }
 
   /** 玩家步枪弹与敌人：半径按兵种；空间网格缩小弹道+1 后的邻域检测量 */
@@ -1130,23 +1935,55 @@ export class SurvivorGameModel {
 
       const hitEnemy = (e: Enemy): void => {
         let dmg = b.damage;
-        const cc = Math.min(1, Math.max(0, this.critChance));
-        if (cc > 0 && Math.random() < cc) {
+        const cc = Math.min(
+          1,
+          Math.max(
+            0,
+            this.critChance + this.chestBuffCritChanceBonus + this.rifleCritChanceAdd,
+          ),
+        );
+        const isCrit = cc > 0 && Math.random() < cc;
+        if (isCrit) {
           dmg *= RIFLE_CRIT_BASE_MULT;
           const ex = this.critOnHitDamageMult;
           dmg *= Number.isFinite(ex) && ex > 0 ? ex : 1;
         }
+        const lowFrac = this.playerMaxHp > 1e-6 ? this.playerHp / this.playerMaxHp : 1;
+        if (lowFrac <= 0.3) {
+          const lm = this.lowHpDamageMult;
+          if (Number.isFinite(lm) && lm > 0) {
+            dmg *= lm;
+          }
+        }
         e.hp -= dmg;
-        bullets.splice(i, 1);
+        let ls = this.chestBuffLifestealRatio + this.lifestealAdd;
+        if (isCrit) {
+          ls += this.critLifestealAdd;
+        }
+        if (ls > 0 && Number.isFinite(ls)) {
+          this.playerHp = Math.min(this.playerMaxHp, this.playerHp + dmg * ls);
+        }
+        const ids = b.hitEnemyIds ?? (b.hitEnemyIds = []);
+        ids.push(e.id);
+        let hr = b.hitsRemaining ?? 1;
+        hr -= 1;
+        b.hitsRemaining = hr;
+        if (hr <= 0) {
+          bullets.splice(i, 1);
+        }
         if (e.hp <= 0) {
           this._onEnemyKilled(e);
         }
       };
 
       const testEnemy = (e: Enemy): boolean => {
+        if (b.hitEnemyIds?.includes(e.id)) {
+          return false;
+        }
         const dx = e.x - b.x;
         const dy = e.y - b.y;
-        const rr = e.radius + RIFLE_BULLET_RADIUS;
+        const brad = b.hitRadius ?? RIFLE_BULLET_RADIUS;
+        const rr = e.radius + brad;
         if (dx * dx + dy * dy > rr * rr) {
           return false;
         }
@@ -1190,7 +2027,55 @@ export class SurvivorGameModel {
       this.enemies.splice(idx, 1);
     }
     this.sessionKills += 1;
+    const kh = this.killHealAdd;
+    if (kh > 0 && Number.isFinite(kh)) {
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + kh);
+    }
     this._dropXpGem(e.x, e.y, e.gemValue);
+    const luck = Number.isFinite(this.luckMult) && this.luckMult > 0 ? Math.min(1.75, this.luckMult) : 1;
+    const p = Math.min(
+      0.13,
+      GEAR_CHEST_DROP_BASE_CHANCE * (1 + Math.min(24, e.level) * 0.024) * luck,
+    );
+    if (Math.random() < p) {
+      this._trySpawnGearChestNear(e.x, e.y, e.level);
+    }
+  }
+
+  /** 击杀点旁尝试投放一只装备箱（与周期增益箱错开间距） */
+  private _trySpawnGearChestNear(x: number, y: number, monsterLevel: number): void {
+    const m = WORLD_SIZE;
+    const margin = CHEST_RADIUS + 8;
+    const minChestSepSq = 95 * 95;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const ang = Math.random() * Math.PI * 2;
+      const d = 24 + Math.random() * 40;
+      let rx = x + Math.cos(ang) * d;
+      let ry = y + Math.sin(ang) * d;
+      rx = Math.min(m - margin, Math.max(margin, rx));
+      ry = Math.min(m - margin, Math.max(margin, ry));
+      const sp = this._spawnPositionClearOfObstacles(rx, ry, CHEST_RADIUS);
+      let ok = true;
+      for (const ch of this.chests) {
+        const sx = sp.x - ch.x;
+        const sy = sp.y - ch.y;
+        if (sx * sx + sy * sy < minChestSepSq) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) {
+        continue;
+      }
+      this.chests.push({
+        x: sp.x,
+        y: sp.y,
+        despawnAt: this.gameTime + CHEST_LIFETIME_SEC,
+        chestKind: 'gear',
+        monsterLevel,
+      });
+      return;
+    }
   }
 
   /** 在死亡点投放经验：优先并入合并半径内最近的一枚宝石；否则在未满上限时新建；满员则并入全图距该点最近的宝石 */
@@ -1240,9 +2125,10 @@ export class SurvivorGameModel {
     sink.y += (y - sink.y) * pullCap;
   }
 
-  /** 接触伤害：重叠时先把怪沿径向推开，再按间隔扣血，避免贴脸叠层连续受伤 */
+  /** 接触伤害：重叠时先把怪沿径向推开，再按间隔扣血，避免贴脸叠层连续受伤；反伤可能击杀当前敌，故倒序索引遍历 */
   private _enemyPlayerContact(): void {
-    for (const e of this.enemies) {
+    for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
+      const e = this.enemies[ei]!;
       const dx = e.x - this.playerX;
       const dy = e.y - this.playerY;
       const distSq = dx * dx + dy * dy;
@@ -1265,7 +2151,8 @@ export class SurvivorGameModel {
         ny /= nlen;
       }
       const overlap = rr - dist;
-      const push = overlap + ENEMY_CONTACT_SEPARATION_PAD;
+      const kb = Number.isFinite(this.knockbackMult) && this.knockbackMult > 0 ? this.knockbackMult : 1;
+      const push = (overlap + ENEMY_CONTACT_SEPARATION_PAD) * kb;
       e.x += nx * push;
       e.y += ny * push;
       const resolved = resolveCircleWithObstacles(e.x, e.y, e.radius, this.obstacles);
@@ -1277,11 +2164,8 @@ export class SurvivorGameModel {
         continue;
       }
       e.lastHitPlayerAt = this.gameTime;
-      this.playerHp -= e.contactDamage;
-      if (this.playerHp <= 0) {
-        this.playerHp = 0;
-        this.gameOver = true;
-        this.paused = true;
+      this._applyDamageToPlayer(e.contactDamage, e);
+      if (this.gameOver) {
         return;
       }
     }
@@ -1289,13 +2173,16 @@ export class SurvivorGameModel {
 
   /** 距离小于拾取半径则吸收经验并可能触发升级 */
   private _pickupGems(): void {
+    const reach = this._pickupInteractionReach(GEM_RADIUS);
+    const reachSq = reach * reach;
+    const em = Number.isFinite(this.expMult) && this.expMult > 0 ? this.expMult : 1;
+    const xpGainMult = this.chestBuffXpGainMult * em;
     for (let i = this.gems.length - 1; i >= 0; i--) {
       const g = this.gems[i]!;
       const dx = g.x - this.playerX;
       const dy = g.y - this.playerY;
-      const reach = this.pickupRadius + GEM_RADIUS;
-      if (dx * dx + dy * dy <= reach * reach) {
-        this.xp += g.value;
+      if (dx * dx + dy * dy <= reachSq) {
+        this.xp += Math.round(g.value * xpGainMult);
         this.gems.splice(i, 1);
         this._checkLevelUpFromXp();
       }

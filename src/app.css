@@ -1,4 +1,19 @@
-@import 'tailwindcss';
+/* 安卓 Chrome / WebView 默认会给可点击元素加半透明高亮块，关闭以免按钮闪现蓝灰遮罩 */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/** 全局隐藏滚动条；元素仍可 overflow 滚动 */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 html,
 body {
@@ -28,9 +43,88 @@ body {
   min-height: 100dvh;
 }
 
-/** 非局内路由：React 壳层接收点击；局内由画布接收 */
+/** 非局内路由：React 壳层接收点击；局内由画布接收；滑入时裁切横向溢出 */
 #root.shell-interactive {
   pointer-events: auto;
+  overflow-x: hidden;
+}
+
+/** 路由双页叠层：底层旧页保留至顶层流体动画结束（与 `PageTransitionStack` 对应） */
+.page-transition-stack {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.page-transition-base {
+  height: 100%;
+  min-height: 0;
+}
+
+.page-transition-incoming {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  pointer-events: auto;
+  backface-visibility: hidden;
+  transform-origin: 100% 50%;
+  animation: page-fluid-in 0.7s cubic-bezier(0.28, 0.62, 0.12, 0.99) both;
+}
+
+/** 非牛顿流体感：入界黏滞（慢启动+竖向拉伸）、缘圆团化、中段加速、末段轻微过冲后收束 */
+@keyframes page-fluid-in {
+  0% {
+    transform: translate3d(102%, 0, 0) scale(0.84, 1.12);
+    /* filter: blur(8px) saturate(1.08); */
+    border-radius: 70% 0 0 70% / 52% 0 0 52%;
+    box-shadow: -28px 0 56px rgba(0, 0, 0, 0.14);
+  }
+
+  20% {
+    transform: translate3d(48%, 0, 0) scale(0.93, 1.07);
+    /* filter: blur(4px); */
+    border-radius: 34% 0 0 34% / 26% 0 0 26%;
+  }
+
+  42% {
+    transform: translate3d(8%, 0, 0) scale(1.04, 0.96);
+    /* filter: blur(3px); */
+    border-radius: 14px 0 0 14px;
+  }
+
+  62% {
+    transform: translate3d(-1.2%, 0, 0) scale(0.992, 1.018);
+    /* filter: blur(0); */
+    border-radius: 6px 0 0 6px;
+  }
+
+  82% {
+    transform: translate3d(0.35%, 0, 0) scale(1.002, 0.998);
+    filter: none;
+    border-radius: 2px 0 0 2px;
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) scale(1, 1);
+    filter: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition-incoming {
+    animation: none;
+    transform: none;
+    filter: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 #pixi-game-canvas {
@@ -39,4 +133,2628 @@ body {
   z-index: 0;
   display: block;
   touch-action: none;
+}
+
+.page {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  color: #d8ccb8;
+}
+
+.page * {
+  box-sizing: border-box;
+}
+
+.page button {
+  font: inherit;
+}
+
+.page-home {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 236, 220, 0.95) 0%, transparent 55%),
+    linear-gradient(165deg, #fff0e0 0%, #ffd8c0 38%, #ffc8a8 72%, #f0a878 100%);
+}
+
+.page-home-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 50% at 50% 100%, rgba(255, 200, 160, 0.35), transparent 55%),
+    linear-gradient(to bottom, rgba(255, 120, 90, 0.12), transparent 42%, rgba(180, 90, 70, 0.18));
+}
+
+.page-home-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 10vh;
+}
+
+.page-home-decor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.page-home-decor-star {
+  font-size: 1rem;
+  line-height: 1;
+  color: #ffb0a0;
+  text-shadow:
+    0 0 8px rgba(255, 200, 160, 0.9),
+    0 2px 0 rgba(200, 100, 80, 0.35);
+  animation: page-home-decor-bob 2.4s ease-in-out infinite;
+}
+
+.page-home-decor-star--sm {
+  font-size: 0.75rem;
+  opacity: 0.95;
+  animation-delay: 0.35s;
+}
+
+.page-home-decor-star:nth-child(3) {
+  animation-delay: 0.7s;
+}
+
+@keyframes page-home-decor-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-home-decor-star {
+    animation: none;
+  }
+}
+
+.page-home-title {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(1.65rem, 7.2vw, 2.25rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #fffaf0;
+}
+
+.page-home-subtitle {
+  margin: 14px 0 0;
+  padding: 6px 18px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #8a5048;
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 3px 10px rgba(200, 100, 80, 0.18);
+}
+
+.home-menu {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  margin: 0 auto max(1rem, 4vh);
+  width: min(100%, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px))
+    max(16px, env(safe-area-inset-left, 0px));
+}
+
+/** 次要入口双列：原为 6 行全宽按钮，改为 3 行以露出更多背景 */
+.home-menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  width: 100%;
+}
+
+.home-menu-btn {
+  cursor: pointer;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  padding: 11px 16px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #6a4038;
+  background: linear-gradient(180deg, #fffefb 0%, #ffe8d8 45%, #ffd0b8 100%);
+  box-shadow:
+    0 4px 0 rgba(200, 120, 90, 0.55),
+    0 6px 16px rgba(180, 90, 60, 0.22);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.12s ease;
+}
+
+.home-menu-btn:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 1px 0 rgba(200, 120, 90, 0.45),
+    0 3px 10px rgba(180, 90, 60, 0.2);
+  filter: brightness(0.98);
+}
+
+.home-menu-btn--primary {
+  width: 100%;
+  color: #fffaf5;
+  border-color: #ffd8a8;
+  background: linear-gradient(180deg, #ffb060 0%, #ff8848 48%, #f06840 100%);
+  text-shadow: 0 1px 2px rgba(120, 40, 20, 0.45);
+  box-shadow:
+    0 4px 0 rgba(180, 70, 40, 0.85),
+    0 8px 20px rgba(220, 90, 50, 0.35);
+}
+
+.home-menu-btn--primary:active {
+  box-shadow:
+    0 1px 0 rgba(180, 70, 40, 0.75),
+    0 4px 12px rgba(220, 90, 50, 0.28);
+}
+
+/** 网格内小格：略扁、允许两字换行，触控目标仍保持约 44px 高 */
+.home-menu-btn--tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 8px;
+  border-width: 2px;
+  border-radius: 14px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  text-align: center;
+  word-break: keep-all;
+  box-shadow:
+    0 3px 0 rgba(200, 120, 90, 0.5),
+    0 2px 0 rgba(255, 255, 255, 0.55) inset;
+}
+
+.home-menu-btn--tile:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 1px 0 rgba(200, 120, 90, 0.42),
+    0 1px 0 rgba(255, 255, 255, 0.45) inset;
+}
+
+.home-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(60, 40, 48, 0.55);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.home-mode-panel {
+  width: min(100%, 384px);
+  border-radius: 24px;
+  border: 4px solid rgba(255, 255, 255, 0.92);
+  padding: 20px 18px 22px;
+  background: linear-gradient(165deg, #fffaf5 0%, #ffe8e0 55%, #ffd8d0 100%);
+  box-shadow:
+    0 6px 0 rgba(200, 120, 100, 0.35),
+    0 16px 40px rgba(80, 40, 40, 0.28);
+}
+
+.home-mode-title {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 1.28rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #8a5048;
+}
+
+.home-mode-hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: center;
+  color: #9a7068;
+}
+
+.home-mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-mode-option {
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 16px;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  padding: 12px 14px;
+  text-align: left;
+  color: #5a3830;
+  background: linear-gradient(180deg, #ffffff 0%, #fff0e8 100%);
+  box-shadow: 0 4px 0 rgba(200, 140, 120, 0.35);
+  transition: transform 0.1s ease;
+}
+
+.home-mode-option:active {
+  transform: translateY(2px);
+  background: linear-gradient(180deg, #fff8f4 0%, #ffe8e0 100%);
+}
+
+.home-mode-option-name {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 17px;
+  font-weight: 800;
+  color: #6a4038;
+}
+
+.home-mode-option-sum {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #9a7868;
+}
+
+.home-mode-cancel {
+  margin-top: 14px;
+  width: 100%;
+  cursor: pointer;
+  border: none;
+  border-radius: 999px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 15px;
+  font-weight: 700;
+  color: #a08078;
+}
+
+.page-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.page-settings.page-panel {
+  min-height: 100%;
+}
+
+.page-panel-card {
+  width: min(100%, 420px);
+  border: 2px solid #6a5840;
+  border-radius: 16px;
+  background: linear-gradient(to bottom, #2c241c, #1a1410);
+  padding: 24px 20px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.page-panel-title {
+  margin: 0;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  color: #f5e6d3;
+}
+
+.page-panel-body {
+  margin-top: 18px;
+  white-space: pre-wrap;
+  font-size: 16px;
+  line-height: 1.75;
+  color: #d8ccb8;
+}
+
+/* 占位说明等短段落：与标题同宽居中 */
+.page-panel-body--center {
+  text-align: center;
+}
+
+.page-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: 14px 12px 20px;
+  background: linear-gradient(to top, rgba(15, 12, 9, 0.96), rgba(15, 12, 9, 0));
+}
+
+/** 装备页底栏：与首页同系浅色渐变，避免大块深色条 */
+.page-equipment .page-bottom-bar {
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(255, 236, 220, 0.97), rgba(255, 240, 228, 0));
+}
+
+.page-btn-primary {
+  border: 2px solid #5a4020;
+  border-radius: 999px;
+  background: #e8c878;
+  color: #2a1a0a;
+  padding: 10px 38px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/** 装备页主按钮：与首页「开始游戏」同款橙渐变 */
+.page-equipment .page-btn-primary {
+  border: 3px solid #ffd8a8;
+  padding: 11px 40px;
+  font-weight: 800;
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ffb060 0%, #ff8848 48%, #f06840 100%);
+  text-shadow: 0 1px 2px rgba(120, 40, 20, 0.45);
+  box-shadow:
+    0 4px 0 rgba(180, 70, 40, 0.85),
+    0 8px 20px rgba(220, 90, 50, 0.35);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.page-equipment .page-btn-primary:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 1px 0 rgba(180, 70, 40, 0.75),
+    0 4px 12px rgba(220, 90, 50, 0.28);
+}
+
+.page-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 96px;
+}
+
+.page-shop,
+.page-settings {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(to bottom, #181008, #0e0a08);
+}
+
+/** 统计与成就：与图鉴、装备同系暖色底，避免与设置/商店深色页混用 */
+.page-stats,
+.page-achievements {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: #5a3830;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 236, 220, 0.97) 0%, transparent 55%),
+    linear-gradient(165deg, #fff0e0 0%, #ffd8c0 38%, #ffc8a8 72%, #f0a878 100%);
+}
+
+/** 装备页：与首页一致的暖色渐变底，避免与其它深色子页共用同一套背景 */
+.page-equipment {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: #5a3830;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 236, 220, 0.97) 0%, transparent 55%),
+    linear-gradient(165deg, #fff0e0 0%, #ffd8c0 38%, #ffc8a8 72%, #f0a878 100%);
+}
+
+.page-codex {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: #5a3830;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 236, 220, 0.97) 0%, transparent 55%),
+    linear-gradient(165deg, #fff0e0 0%, #ffd8c0 38%, #ffc8a8 72%, #f0a878 100%);
+}
+
+.page-codex-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 90% 50% at 50% 100%, rgba(255, 200, 160, 0.35), transparent 55%),
+    linear-gradient(to bottom, rgba(255, 120, 90, 0.1), transparent 42%, rgba(180, 90, 70, 0.14));
+}
+
+.page-codex .codex-header,
+.page-codex .codex-tabs-wrap,
+.page-codex .codex-body {
+  position: relative;
+  z-index: 1;
+}
+
+.page-shop header {
+  text-align: center;
+  padding: 36px 16px 8px;
+  flex-shrink: 0;
+}
+
+.page-codex header {
+  text-align: center;
+  padding: 14px 14px 10px;
+  flex-shrink: 0;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 14px rgba(200, 100, 80, 0.12);
+}
+
+.page-shop h1,
+.page-achievements h1 {
+  margin: 0;
+  font-size: 28px;
+  color: #fff4d0;
+}
+
+.page-codex h1.codex-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #8a5048;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.page-equipment .equipment-header {
+  text-align: left;
+  padding: 12px 16px 14px;
+  flex-shrink: 0;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 14px rgba(200, 100, 80, 0.12);
+}
+
+.page-equipment .equipment-header.equipment-header--balanced {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.page-equipment .equipment-header.equipment-header--balanced .codex-back {
+  justify-self: start;
+}
+
+.page-equipment .equipment-header-title {
+  margin: 0;
+  justify-self: center;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #8a5048;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.page-equipment .equipment-header h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #8a5048;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+/** 装备页右上角：进入售卖 / 确认出售 */
+.page-equipment .equipment-header-sell-btn {
+  justify-self: end;
+  min-width: 88px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(180deg, #fffefb 0%, #ffe8d8 100%);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #8a5048;
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(200, 130, 100, 0.3);
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.page-equipment .equipment-header-sell-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 rgba(200, 130, 100, 0.28);
+}
+
+.page-equipment .equipment-header-sell-btn--confirm {
+  border-color: #ffb898;
+  background: linear-gradient(180deg, #fff5f0 0%, #ffd8c8 100%);
+  color: #d05838;
+  box-shadow:
+    0 3px 0 rgba(220, 100, 70, 0.45),
+    0 0 0 1px rgba(255, 200, 160, 0.6);
+}
+
+/** 装备顶栏返回：与首页文字层次一致 */
+.page-equipment .equipment-header .codex-back {
+  color: #8a5048;
+}
+
+.page-equipment .equipment-header .codex-back-chevron {
+  border-right-color: #c87858;
+}
+
+.page-equipment .equipment-tip {
+  margin-top: 12px;
+  padding: 0 8px;
+}
+
+/** 统计页顶栏（与图鉴顶栏同系） */
+.stats-header {
+  flex-shrink: 0;
+  padding: 14px 16px 12px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 14px rgba(200, 100, 80, 0.12);
+  text-align: center;
+}
+
+.stats-header-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #8a5048;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.stats-header-sub {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #7a6058;
+}
+
+.stats-body {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 14px 16px max(96px, calc(88px + env(safe-area-inset-bottom, 0px)));
+}
+
+.stats-grid {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats-metric {
+  display: flex;
+  min-height: 88px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 12px 14px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 236, 220, 0.9) 100%);
+  box-shadow:
+    0 3px 0 rgba(200, 130, 100, 0.2),
+    0 8px 18px rgba(160, 90, 70, 0.08);
+}
+
+.stats-metric--wide {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+
+.stats-metric-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #a07060;
+}
+
+.stats-metric-value {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.25;
+  color: #6a3828;
+  word-break: break-word;
+}
+
+.stats-note {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(200, 140, 120, 0.45);
+  background: rgba(255, 252, 248, 0.88);
+  font-size: 11px;
+  line-height: 1.55;
+  color: #7a6058;
+}
+
+/** 成就页顶栏 */
+.achievements-header {
+  flex-shrink: 0;
+  padding: 14px 16px 14px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 14px rgba(200, 100, 80, 0.12);
+  text-align: center;
+}
+
+.achievements-header-title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #8a5048;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.achievements-summary {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #7a6058;
+}
+
+.achievements-progress {
+  display: inline-block;
+  margin: 10px 0 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #8a5048;
+  border: 1px solid rgba(200, 140, 120, 0.35);
+}
+
+.page-achievements .page-scroll {
+  padding: 14px 16px max(96px, calc(88px + env(safe-area-inset-bottom, 0px)));
+}
+
+.ach-list {
+  width: min(100%, 480px);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.ach-item {
+  margin-bottom: 12px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.78);
+  border-left-width: 6px;
+  border-left-color: rgba(140, 130, 120, 0.45);
+  background: linear-gradient(165deg, rgba(255, 252, 248, 0.92) 0%, rgba(255, 232, 216, 0.75) 100%);
+  padding: 14px 14px 14px 12px;
+  box-shadow: 0 3px 0 rgba(200, 130, 100, 0.15);
+}
+
+.ach-item--unlocked {
+  border-left-color: #d8a028;
+  background: linear-gradient(165deg, rgba(255, 248, 232, 0.98) 0%, rgba(255, 228, 200, 0.88) 100%);
+  box-shadow:
+    0 3px 0 rgba(200, 140, 60, 0.28),
+    0 8px 18px rgba(200, 130, 80, 0.12);
+}
+
+.ach-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ach-item-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: #6a5048;
+}
+
+.ach-item-title--ok {
+  color: #5a3828;
+}
+
+.ach-item-badge {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #8a7868;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(180, 160, 150, 0.45);
+}
+
+.ach-item-badge--ok {
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ffb060 0%, #e05838 100%);
+  border-color: rgba(255, 200, 160, 0.65);
+  text-shadow: 0 1px 1px rgba(120, 40, 20, 0.35);
+}
+
+.ach-item-desc {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #7a6058;
+}
+
+.ach-item-desc--ok {
+  color: #6a5048;
+}
+
+/** 统计 / 成就底栏：与装备页同色渐变条 */
+.page-stats .page-bottom-bar,
+.page-achievements .page-bottom-bar {
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(255, 236, 220, 0.97), rgba(255, 240, 228, 0));
+}
+
+.page-stats .page-btn-primary,
+.page-achievements .page-btn-primary {
+  border: 3px solid #ffd8a8;
+  padding: 11px 40px;
+  font-weight: 800;
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ffb060 0%, #ff8848 48%, #f06840 100%);
+  text-shadow: 0 1px 2px rgba(120, 40, 20, 0.45);
+  box-shadow:
+    0 4px 0 rgba(180, 70, 40, 0.85),
+    0 8px 20px rgba(220, 90, 50, 0.35);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.page-stats .page-btn-primary:active,
+.page-achievements .page-btn-primary:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 1px 0 rgba(180, 70, 40, 0.75),
+    0 4px 12px rgba(220, 90, 50, 0.28);
+}
+
+/** 图鉴 */
+.codex-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(90, 72, 56, 0.55);
+  padding: 12px 12px 12px;
+}
+
+.codex-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8d8c8;
+  cursor: pointer;
+}
+
+.codex-back-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-right: 10px solid #e8d8c8;
+}
+
+.codex-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.875rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: #fff8e8;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.codex-sub {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: #8a8078;
+}
+
+.codex-meta {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: #6a6058;
+}
+
+.codex-tabs-wrap {
+  flex-shrink: 0;
+  padding: 12px 12px 0;
+}
+
+.codex-tab-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 640px) {
+  .codex-tab-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .page-codex .codex-tab-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.codex-tab {
+  position: relative;
+  border-radius: 10px;
+  border: 2px solid rgba(122, 104, 96, 0.9);
+  padding: 8px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #c8b8a8;
+  background: rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+
+.codex-tab:active {
+  transform: scale(0.98);
+}
+
+.codex-tab--active {
+  border-color: #ffe8a0;
+  background: #f0c860;
+  color: #1a1208;
+}
+
+.codex-tab-badge {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  min-width: 1.15rem;
+  border-radius: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #3a3228;
+  color: #e8d8c8;
+}
+
+.codex-tab-badge--active {
+  background: #fff0c0;
+  color: #2a1a0a;
+}
+
+.codex-category-hint {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: #c9b8a0;
+}
+
+.codex-hint-sep {
+  color: #6a6058;
+}
+
+.codex-hint-count {
+  font-weight: 700;
+  color: #ffcc66;
+}
+
+.codex-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 112px;
+}
+
+.codex-empty {
+  margin: 24px auto 0;
+  max-width: 520px;
+  border-radius: 12px;
+  border: 1px solid rgba(74, 64, 56, 0.6);
+  background: rgba(26, 22, 18, 0.75);
+  padding: 40px 24px;
+  text-align: center;
+  color: #8a8078;
+}
+
+.codex-entry-list {
+  display: flex;
+  max-width: 680px;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.codex-card-surface {
+  border-radius: 12px;
+}
+
+.codex-card-surface--plain {
+  border: 1px solid #5a4a40;
+  background: rgba(30, 24, 20, 0.92);
+}
+
+.codex-card-surface--tier {
+  border-width: 2px;
+  border-style: solid;
+}
+
+.codex-card-inner {
+  padding: 20px;
+}
+
+.codex-card-single-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff8f0;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.codex-card-single-sub {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #b8a898;
+}
+
+.codex-stat-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 16px;
+  font-size: 14px;
+}
+
+.codex-stat-dt {
+  color: #9a9088;
+}
+
+.codex-stat-dd {
+  margin: 0;
+  font-weight: 600;
+  color: #f0e8d8;
+}
+
+.codex-card-preview {
+  margin-top: 16px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #d0c4b8;
+}
+
+.codex-detail-btn {
+  display: block;
+  margin: 24px auto 0;
+  border: 2px solid #c9a030;
+  border-radius: 10px;
+  background: rgba(58, 48, 32, 0.95);
+  padding: 8px 24px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffe8a8;
+  cursor: pointer;
+}
+
+.codex-row-btn {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.codex-row-inner {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.codex-row-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.codex-row-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #f2ebe4;
+}
+
+.codex-row-summary {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #a89888;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.codex-row-chev {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  font-size: 1.875rem;
+  font-weight: 700;
+}
+
+.codex-portrait-frame {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 12px;
+  background: #0c0a08;
+  box-shadow: 0 0 0 1px rgba(58, 50, 40, 0.9);
+}
+
+.codex-sprite {
+  width: 3.25rem;
+  height: 3.25rem;
+}
+
+.codex-icon-frame {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 12px;
+  background: #0c0a08;
+  box-shadow: 0 0 0 1px rgba(58, 50, 40, 0.9);
+}
+
+.codex-center {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.codex-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.codex-modal-center {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.codex-modal-panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: min(560px, 86vh);
+  overflow: hidden;
+  border-radius: 16px;
+  border: 2px solid #8a7048;
+  background: rgba(30, 26, 22, 0.98);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.codex-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(90, 72, 56, 0.4);
+  padding: 12px 16px;
+}
+
+.codex-modal-head-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.codex-modal-title {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  padding-right: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #fff4e8;
+}
+
+.codex-modal-close {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #3a3228;
+  padding: 4px 10px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #e8d8c8;
+  cursor: pointer;
+}
+
+.codex-modal-body {
+  max-height: calc(min(560px, 86vh) - 52px);
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.codex-modal-body-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d8ccb8;
+}
+
+/** 图鉴页：与首页同系暖色 Q 风（覆盖上文通用 `.codex-*`） */
+.page-codex .codex-decor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.page-codex .codex-decor-star {
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #ffb0a0;
+  text-shadow:
+    0 0 8px rgba(255, 200, 160, 0.9),
+    0 2px 0 rgba(200, 100, 80, 0.35);
+}
+
+.page-codex .codex-back {
+  color: #8a5048;
+}
+
+.page-codex .codex-back-chevron {
+  border-right-color: #c87858;
+}
+
+.page-codex .codex-subtitle-pill {
+  margin: 10px auto 0;
+  padding: 5px 16px;
+  max-width: 92%;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 3px 10px rgba(200, 100, 80, 0.15);
+  text-align: center;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #8a5048;
+}
+
+.page-codex .codex-meta {
+  color: #a08078;
+}
+
+.page-codex .codex-tab-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.page-codex .codex-tab {
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fffefb 0%, #ffe8d8 100%);
+  color: #8a7068;
+  box-shadow: 0 3px 0 rgba(200, 130, 100, 0.28);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.page-codex .codex-tab--active {
+  border-color: #ffb898;
+  background: linear-gradient(180deg, #fff5f0 0%, #ffd8c8 100%);
+  color: #d05838;
+  box-shadow:
+    0 3px 0 rgba(220, 100, 70, 0.45),
+    0 0 0 1px rgba(255, 200, 160, 0.55);
+}
+
+.page-codex .codex-tab-badge {
+  background: rgba(255, 255, 255, 0.55);
+  color: #8a5048;
+  border: 1px solid rgba(200, 120, 90, 0.35);
+}
+
+.page-codex .codex-tab-badge--active {
+  background: #fff0c0;
+  color: #5a3020;
+}
+
+.page-codex .codex-category-hint {
+  color: #9a7068;
+}
+
+.page-codex .codex-hint-count {
+  color: #d05838;
+}
+
+.page-codex .codex-empty {
+  border: 3px solid rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.45);
+  color: #9a7868;
+}
+
+.page-codex .codex-card-surface--plain {
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  background: linear-gradient(165deg, #fffefb 0%, #ffe8dc 100%);
+  box-shadow: 0 4px 0 rgba(200, 120, 90, 0.22);
+}
+
+.page-codex .codex-card-single-title {
+  color: #6a4038;
+  text-shadow: none;
+}
+
+.page-codex .codex-card-single-sub {
+  color: #9a7868;
+}
+
+.page-codex .codex-stat-dt {
+  color: #a08078;
+}
+
+.page-codex .codex-stat-dd {
+  color: #5a3830;
+}
+
+.page-codex .codex-card-preview {
+  color: #7a6058;
+}
+
+.page-codex .codex-detail-btn {
+  border: 3px solid #ffd8a8;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffb060 0%, #ff8848 48%, #f06840 100%);
+  color: #fffaf5;
+  text-shadow: 0 1px 2px rgba(120, 40, 20, 0.35);
+  box-shadow: 0 4px 0 rgba(180, 70, 40, 0.75);
+}
+
+.page-codex .codex-row-title {
+  color: #6a4038;
+}
+
+.page-codex .codex-row-summary {
+  color: #9a7868;
+}
+
+.page-codex .codex-portrait-frame,
+.page-codex .codex-icon-frame {
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 8px rgba(200, 100, 80, 0.15);
+}
+
+.page-codex .codex-modal-backdrop {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  background: rgba(60, 40, 48, 0.45);
+}
+
+.page-codex .codex-modal-panel {
+  border: 4px solid rgba(255, 255, 255, 0.92);
+  border-radius: 22px;
+  background: linear-gradient(165deg, #fffaf5 0%, #ffe8e0 55%, #ffd8d0 100%);
+  box-shadow:
+    0 6px 0 rgba(200, 120, 100, 0.3),
+    0 16px 40px rgba(80, 40, 40, 0.22);
+}
+
+.page-codex .codex-modal-head {
+  border-bottom: 1px solid rgba(200, 140, 120, 0.35);
+}
+
+.page-codex .codex-modal-title {
+  color: #8a5048;
+}
+
+.page-codex .codex-modal-close {
+  background: rgba(255, 255, 255, 0.55);
+  color: #8a5048;
+}
+
+.page-codex .codex-modal-body-text {
+  color: #6a5048;
+}
+
+.page-codex .page-bottom-bar {
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(255, 236, 220, 0.97), rgba(255, 240, 228, 0));
+}
+
+.page-codex .page-btn-primary {
+  border: 3px solid #ffd8a8;
+  padding: 11px 40px;
+  font-weight: 800;
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ffb060 0%, #ff8848 48%, #f06840 100%);
+  text-shadow: 0 1px 2px rgba(120, 40, 20, 0.45);
+  box-shadow:
+    0 4px 0 rgba(180, 70, 40, 0.85),
+    0 8px 20px rgba(220, 90, 50, 0.35);
+}
+
+/** 军功商店 */
+.shop-merit {
+  font-weight: 700;
+  color: #e8c060;
+}
+
+.shop-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #7a7060;
+}
+
+.shop-tip {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #9ad89a;
+}
+
+.shop-tab-row {
+  display: flex;
+  max-width: 680px;
+  margin: 16px auto 0;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.shop-tab-top {
+  flex-shrink: 0;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #5a4838;
+  background: rgba(0, 0, 0, 0.25);
+  color: #c8b8a0;
+}
+
+.shop-tab-top--active-eq {
+  border-color: transparent;
+  background: #c49a30;
+  color: #1a0e06;
+}
+
+.shop-tab-top--active-supply {
+  border-color: transparent;
+  background: #3a6048;
+  color: #e8f8e8;
+}
+
+.shop-tab-sub {
+  flex-shrink: 0;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: rgba(0, 0, 0, 0.2);
+  color: #908070;
+}
+
+.shop-tab-sub--active {
+  border-color: #8a7030;
+  background: #2a2018;
+  color: #f0d898;
+}
+
+.shop-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px 112px;
+}
+
+.shop-list {
+  display: flex;
+  max-width: 680px;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.shop-row {
+  border-radius: 10px;
+  border-left: 5px solid #6a5020;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 12px;
+}
+
+.shop-row--eq-weapon {
+  border-left-color: #5a9a5a;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.shop-row--eq-armor {
+  border-left-color: #5a8a7a;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.shop-row--eq-tactical {
+  border-left-color: #6a8a5a;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.shop-row--supply {
+  border-left-color: #5a7050;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.shop-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shop-row-left {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.shop-row-text {
+  min-width: 0;
+}
+
+.shop-row-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff4e8;
+}
+
+.shop-row-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: #908070;
+}
+
+.shop-row-desc-tiny {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: #6a8068;
+}
+
+.shop-row-right {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.shop-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e8c878;
+}
+
+.shop-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.shop-hold {
+  font-size: 12px;
+  color: #a0a898;
+}
+
+.shop-hold strong {
+  font-weight: 700;
+  color: #d8e8d0;
+}
+
+.ui-icon-shrink {
+  flex-shrink: 0;
+}
+
+.shop-btn-buy {
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  border: 0;
+  cursor: pointer;
+  background: #c49a30;
+  color: #1a1008;
+}
+
+.shop-btn-buy:disabled {
+  cursor: not-allowed;
+  background: #3a3028;
+  color: #6a6058;
+}
+
+.shop-btn-buy--supply:enabled {
+  background: #4a8058;
+  color: #f0fff0;
+}
+
+.shop-btn-equip {
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  border: 0;
+  cursor: pointer;
+}
+
+.shop-btn-equip--weapon-on {
+  border: 1px solid #5a8a5a;
+  background: #1a2a1a;
+  color: #a8e0a8;
+}
+
+.shop-btn-equip--armor-on {
+  border: 1px solid #5a8a8a;
+  background: #1a2a22;
+  color: #a8e0d8;
+}
+
+.shop-btn-equip--tactical-on {
+  border: 1px solid #6a9a5a;
+  background: #1a2a18;
+  color: #b8e8a8;
+}
+
+.shop-btn-equip:disabled {
+  cursor: not-allowed;
+  background: #2a2820;
+  color: #5a5850;
+}
+
+/* 局内暂停装备层：叠在 Pixi 画布之上（#root 高于 canvas） */
+.game-pause-equipment-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+  background: rgba(12, 10, 8, 0.55);
+}
+
+.page-equipment--battle-pause {
+  min-height: 100%;
+  background:
+    linear-gradient(to bottom, rgba(30, 20, 24, 0.22), rgba(20, 14, 12, 0.12)),
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 236, 220, 0.92) 0%, transparent 55%),
+    linear-gradient(165deg, #fff0e0 0%, #ffd8c0 38%, #ffc8a8 72%, #f0a878 100%);
+}
+
+/** 装备页（暖色 Q 风，与首页一致） */
+.equipment-intro {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #9a7868;
+}
+
+.equipment-tip {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #c87858;
+}
+
+.equipment-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px max(128px, calc(88px + env(safe-area-inset-bottom, 0px)));
+}
+
+/** 装备页主内容宽度约束，避免大屏一行过长 */
+.equipment-content-shell {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/** 顶区：立绘 + 一句话说明 + 四维聚合（卡片化） */
+.equipment-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 14px;
+  padding: 14px 14px 16px;
+  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 236, 220, 0.9) 100%);
+  box-shadow:
+    0 4px 0 rgba(200, 130, 100, 0.2),
+    0 12px 28px rgba(160, 90, 70, 0.1);
+  gap: 12px;
+}
+
+@media (min-width: 400px) {
+  .equipment-hero {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
+.equipment-hero-figure {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 6px 8px 8px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  background: linear-gradient(165deg, #fffefb 0%, #ffe8d8 55%, #ffd8c8 100%);
+  box-shadow: 0 3px 0 rgba(200, 120, 90, 0.28);
+}
+
+.equipment-hero-figure-label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #a07060;
+}
+
+.equipment-hero-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.equipment-hint-sub {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #7a6058;
+}
+
+.equipment-stat-pills {
+  display: grid;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.equipment-stat-pills-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(200, 140, 120, 0.35);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.equipment-stat-pills-k {
+  font-weight: 700;
+  color: #8a6860;
+}
+
+.equipment-stat-pills-v {
+  font-weight: 900;
+  color: #8a5048;
+}
+
+/** 分区：身位 / 仓库 */
+.equipment-panel {
+  margin-bottom: 14px;
+  padding: 14px 14px 16px;
+  border-radius: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.78);
+  background: linear-gradient(165deg, rgba(255, 252, 248, 0.96) 0%, rgba(255, 232, 216, 0.88) 100%);
+  box-shadow:
+    0 3px 0 rgba(200, 130, 100, 0.18),
+    0 8px 20px rgba(160, 90, 70, 0.08);
+}
+
+.equipment-panel--stash {
+  padding-bottom: 14px;
+}
+
+.equipment-panel-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #7a4838;
+}
+
+.equipment-panel-title--inline {
+  display: inline;
+  margin-right: 8px;
+}
+
+.equipment-panel-lead {
+  margin: 0 0 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #7a6058;
+}
+
+.equipment-slots-grid-wrap {
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.equipment-mini-cell--active {
+  box-shadow:
+    0 0 0 2px rgba(255, 200, 160, 0.6),
+    0 3px 0 rgba(220, 100, 70, 0.45) !important;
+  border-color: #ffb898 !important;
+}
+
+.equipment-mini-tier {
+  font-size: 10px;
+  color: #806890;
+}
+
+.equipment-stash-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.equipment-stash-head-titles {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.equipment-stash-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #8a5048;
+  border: 1px solid rgba(200, 140, 120, 0.35);
+}
+
+.equipment-stash-head-actions {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.equipment-sell-banner {
+  max-width: 100%;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 2px dashed rgba(224, 120, 80, 0.55);
+  background: rgba(255, 248, 240, 0.85);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #a05838;
+}
+
+.equipment-sell-toast {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(120, 180, 120, 0.45);
+  background: rgba(232, 248, 232, 0.92);
+  font-size: 13px;
+  font-weight: 700;
+  color: #3a5838;
+}
+
+.equipment-sell-toast-dismiss {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 2px solid rgba(140, 100, 80, 0.35);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  font-weight: 700;
+  color: #6a5048;
+  cursor: pointer;
+  appearance: none;
+}
+
+.equipment-unequip-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  color: #8a5048;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.equipment-purple-toolbar-hint {
+  font-size: 13px;
+  opacity: 0.78;
+  color: #7a6058;
+}
+
+.equipment-quick-sell {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  background: linear-gradient(165deg, #fffefb 0%, #ffe8d8 55%, #ffd8c8 100%);
+  box-shadow: 0 3px 0 rgba(200, 130, 100, 0.22);
+}
+
+.equipment-quick-sell-label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #a07060;
+}
+
+.equipment-quick-sell-chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.equipment-quick-sell-chip {
+  min-width: 44px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  font-weight: 800;
+  color: #8a5048;
+  cursor: pointer;
+  box-shadow: 0 2px 0 rgba(200, 130, 100, 0.3);
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.equipment-quick-sell-chip:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 rgba(200, 130, 100, 0.28);
+}
+
+/* 上一局结算写入的紫箱随机装（与军功商店固定装区分） */
+.equipment-session-loot {
+  max-width: 440px;
+  margin: 0 auto 16px;
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  border: 2px solid rgba(140, 100, 160, 0.45);
+  background: linear-gradient(165deg, #faf6ff 0%, #f0e8f8 55%, #e8dcf0 100%);
+  box-shadow: 0 4px 14px rgba(100, 60, 120, 0.12);
+}
+
+.equipment-session-loot-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #5a3a6e;
+}
+
+.equipment-session-loot-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #7a6088;
+}
+
+.equipment-session-loot-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.equipment-session-loot-item {
+  margin-bottom: 10px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 90, 140, 0.35);
+  border-left-width: 4px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.equipment-session-loot-item:last-child {
+  margin-bottom: 0;
+}
+
+.equipment-session-loot-item-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.equipment-session-loot-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #3a2848;
+}
+
+.equipment-session-loot-meta {
+  font-size: 10px;
+  color: #806890;
+}
+
+.equipment-session-loot-affix {
+  margin: 0;
+  padding: 0 0 0 12px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #4a4058;
+}
+
+.equipment-session-loot-affix--rare {
+  color: #6a3a78;
+  font-weight: 600;
+}
+
+.equipment-mini-grid-9 {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.equipment-mini-grid-hole {
+  visibility: hidden;
+  min-height: 68px;
+  pointer-events: none;
+}
+
+.equipment-mini-cell .equipment-grid-cat {
+  margin-bottom: 4px;
+  font-size: 9px;
+}
+
+.equipment-mini-cell .equipment-grid-icon-wrap {
+  min-height: 32px;
+}
+
+.equipment-mini-cell .equipment-grid-name {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.equipment-figure-preview {
+  position: relative;
+  width: 100%;
+  max-width: 112px;
+}
+
+.equipment-figure-base {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 4px 10px rgba(200, 100, 80, 0.25));
+}
+
+.equipment-figure-pin {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(180, 90, 70, 0.35));
+}
+
+.equipment-figure-pin--chest {
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.equipment-figure-pin--weapon {
+  top: 44%;
+  right: -6px;
+  transform: translateY(-50%);
+}
+
+.equipment-figure-pin--belt {
+  top: 54%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.equipment-grid-cell {
+  display: flex;
+  min-height: 100px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  padding: 10px 8px 12px;
+  background: linear-gradient(180deg, #fffefb 0%, #ffe8dc 100%);
+  text-align: center;
+  box-shadow: 0 3px 0 rgba(200, 130, 100, 0.28);
+}
+
+.equipment-grid-cell--empty {
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  border-color: rgba(200, 140, 120, 0.55);
+  background: rgba(255, 255, 255, 0.45);
+  opacity: 0.95;
+}
+
+.equipment-grid-cell--weapon {
+  border-color: rgba(255, 160, 120, 0.85);
+}
+
+.equipment-grid-cell--armor {
+  border-color: rgba(255, 140, 130, 0.75);
+}
+
+.equipment-grid-cell--tactical {
+  border-color: rgba(120, 180, 140, 0.65);
+}
+
+.equipment-grid-cell--slot-btn {
+  width: 100%;
+  margin: 0;
+  border-style: solid;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.equipment-grid-cell--slot-btn:active {
+  filter: brightness(1.08);
+}
+
+.equipment-grid-cell.equipment-mini-cell {
+  min-height: 68px;
+  padding: 5px 3px 6px;
+  border-radius: 12px;
+}
+
+.equipment-grid-cat {
+  margin: 0 0 6px;
+  width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #a08078;
+}
+
+.equipment-grid-placeholder {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c0a090;
+}
+
+.equipment-grid-icon-wrap {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+}
+
+.equipment-grid-name {
+  margin: 8px 0 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 800;
+  color: #6a4038;
+}
+
+.equipment-section {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.equipment-section--spaced {
+  margin-top: 40px;
+}
+
+.equipment-section-title {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a08078;
+}
+
+.equipment-section-title::before,
+.equipment-section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(200, 140, 120, 0.45);
+}
+
+.equipment-weapon-panel {
+  border-radius: 16px;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  background: linear-gradient(to bottom right, #fffaf5 0%, #ffe8e0 100%);
+  box-shadow: 0 4px 0 rgba(200, 120, 90, 0.22);
+  padding: 16px;
+}
+
+.equipment-weapon-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.equipment-weapon-text {
+  min-width: 0;
+}
+
+.equipment-weapon-name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #7a4038;
+}
+
+.equipment-weapon-summary {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #9a7868;
+}
+
+.equipment-stat-list {
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(200, 140, 120, 0.35);
+  font-size: 14px;
+  color: #8a6860;
+}
+
+.equipment-stat-list li {
+  display: flex;
+  gap: 8px;
+}
+
+.equipment-stat-bullet {
+  color: #c8a090;
+}
+
+.equipment-icon-grid {
+  display: grid;
+  max-width: 100%;
+  margin: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.equipment-icon-grid-empty {
+  grid-column: 1 / -1;
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #9a7868;
+}
+
+@media (min-width: 400px) {
+  .equipment-icon-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.equipment-icon-tile {
+  position: relative;
+  display: flex;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  padding: 6px;
+  background: linear-gradient(165deg, #ffffff 0%, #ffe8dc 100%);
+  color: inherit;
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(200, 120, 90, 0.28);
+}
+
+.equipment-icon-tile:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(200, 120, 90, 0.25);
+}
+
+.equipment-icon-tile--weapon-on {
+  border-color: #ff9868;
+  box-shadow:
+    0 3px 0 rgba(220, 100, 60, 0.4),
+    0 0 0 1px rgba(255, 200, 160, 0.55);
+}
+
+.equipment-icon-tile--armor-on {
+  border-color: #ff8878;
+  box-shadow:
+    0 3px 0 rgba(220, 90, 80, 0.38),
+    0 0 0 1px rgba(255, 190, 170, 0.55);
+}
+
+.equipment-icon-tile--tactical-on {
+  border-color: #78c898;
+  box-shadow:
+    0 3px 0 rgba(80, 160, 110, 0.4),
+    0 0 0 1px rgba(180, 230, 200, 0.55);
+}
+
+.equipment-icon-tile-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ff8848 0%, #e05838 100%);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 1px 2px rgba(120, 40, 20, 0.35);
+}
+
+.equipment-icon-tile--with-lock {
+  position: relative;
+  display: flex;
+  padding: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  cursor: default;
+}
+
+.equipment-icon-tile-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.equipment-icon-tile-main:active {
+  transform: translateY(2px);
+}
+
+.equipment-icon-tile-name {
+  display: block;
+  font-size: 12px;
+  text-align: center;
+  padding-left: 4px;
+}
+
+.equipment-icon-lock {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  border-radius: 999px;
+  background: rgba(60, 52, 48, 0.55);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  box-shadow: 0 3px 0 rgba(40, 40, 40, 0.22);
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.equipment-icon-lock--on {
+  border-color: rgba(255, 200, 120, 0.85);
+  background: linear-gradient(180deg, #ffe8a8 0%, #e8a848 100%);
+  color: #4a3020;
+  box-shadow: 0 3px 0 rgba(200, 130, 40, 0.45);
+}
+
+.equipment-icon-lock-svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.equipment-icon-tile--sell-pick {
+  border-color: #ffb898;
+  box-shadow:
+    0 3px 0 rgba(220, 100, 70, 0.45),
+    0 0 0 2px rgba(255, 200, 160, 0.6);
+}
+
+.equipment-icon-tile--sell-disabled {
+  opacity: 0.48;
+  filter: grayscale(0.25);
+}
+
+.equipment-icon-tile-sell-mark {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fffaf5;
+  background: linear-gradient(180deg, #ff8848 0%, #e05838 100%);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 1px 2px rgba(120, 40, 20, 0.35);
+}
+
+.page-equipment--battle-pause .equipment-detail-pop {
+  z-index: 61;
+}
+
+.equipment-detail-pop {
+  z-index: 199;
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 4px solid rgba(255, 255, 255, 0.92);
+  background: linear-gradient(165deg, #fffaf5 0%, #ffe8e0 55%, #ffd8d0 100%);
+  box-shadow:
+    0 6px 0 rgba(200, 120, 100, 0.3),
+    0 16px 40px rgba(80, 40, 40, 0.22);
+}
+
+.equipment-detail-pop-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 16px 16px 18px;
+}
+
+.equipment-detail-pop-scroll--minimal {
+  padding-bottom: 18px;
+}
+
+.equipment-detail-pop-panel {
+  flex-shrink: 0;
+}
+
+.equipment-detail-pop-panel--weapon {
+  padding-left: 12px;
+}
+
+.equipment-pop-summary {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  color: #8a6860;
+}
+
+.equipment-pop-summary--armor {
+  color: #7a7868;
+}
+
+.equipment-pop-summary--tactical {
+  color: #687860;
+}
+
+.equipment-cmp-up {
+  font-weight: 700;
+  color: #e05848;
+}
+
+.equipment-cmp-down {
+  font-weight: 700;
+  color: #38a058;
+}
+
+.equipment-stat-list--compact {
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid rgba(200, 140, 120, 0.35);
+  font-size: 13px;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.equipment-stat-list--compact li {
+  margin: 0;
+}
+
+.equipment-info-lines--compact {
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid rgba(200, 140, 120, 0.35);
+  font-size: 13px;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.equipment-info-lines--compact li {
+  margin: 0;
+}
+
+.equipment-detail-pop .equipment-info-box {
+  padding: 14px 16px 16px;
+  border-radius: 12px;
+}
+
+.equipment-info-box {
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.equipment-info-box--armor {
+  border: 2px solid rgba(255, 160, 140, 0.45);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.equipment-info-box--tactical {
+  border: 2px solid rgba(120, 180, 140, 0.45);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.equipment-info-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.equipment-info-name--armor {
+  color: #6a5048;
+}
+
+.equipment-info-name--tactical {
+  color: #485848;
+}
+
+.equipment-info-sum {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.equipment-info-sum--armor {
+  color: #8a8078;
+}
+
+.equipment-info-sum--tactical {
+  color: #687868;
+}
+
+.equipment-info-lines {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+
+.equipment-info-lines--armor {
+  color: #7a8078;
+}
+
+.equipment-info-lines--tactical {
+  color: #6a7868;
+}
+
+.equipment-info-lines li {
+  display: flex;
+  gap: 8px;
+}
+
+.equipment-info-bullet-a {
+  color: #c8a090;
+}
+
+.equipment-info-bullet-t {
+  color: #90b898;
 }

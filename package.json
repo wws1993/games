@@ -1,7 +1,7 @@
 {
   "name": "com.moretime2023.rougelike",
   "displayName": "敌后幸存者",
-  "version": "3.2.3",
+  "version": "3.2.4",
   "description": "是兄弟，就来砍鬼子",
   "main": "index.js",
   "scripts": {
@@ -21,7 +21,6 @@
   },
   "devDependencies": {
     "@csstools/postcss-cascade-layers": "^6.0.0",
-    "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
@@ -36,7 +35,6 @@
     "lightningcss": "^1.32.0",
     "postcss": "^8.4.49",
     "shelljs": "^0.8.5",
-    "tailwindcss": "^4.0.0",
     "tsx": "^4.19.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.0"

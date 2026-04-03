@@ -6,6 +6,8 @@ import {
   enemyGameConfig,
   type EnemyKind,
 } from '../config/enemyConfig';
+import { survivorBalance } from '../config/survivorBalance';
+import { GAME_MODE_BY_ID, type GameModeId } from '../config/gameModeConfig';
 
 export type { EnemyKind } from '../config/enemyConfig';
 
@@ -21,6 +23,8 @@ export interface EnemyDef {
   contactDamage: number;
   /** 相对 `GEM_XP_VALUE` 的倍率，军官为 10 */
   gemMultiplier: number;
+  /** 飞行等：直线追击时不与障碍圆碰撞解析 */
+  ignoresObstacles?: boolean;
   ranged?: {
     type: EnemyRangedType;
     damage: number;
@@ -34,6 +38,8 @@ export interface EnemyDef {
 
 function buildEnemyDefs(): Record<EnemyKind, EnemyDef> {
   const { stats } = enemyGameConfig;
+  const ps = survivorBalance.enemy.projectileSpeedScale;
+  const psm = Number.isFinite(ps) && ps > 0 ? ps : 1;
   const out = {} as Record<EnemyKind, EnemyDef>;
   for (const k of ENEMY_KIND_ORDER) {
     const s = stats[k];
@@ -43,12 +49,13 @@ function buildEnemyDefs(): Record<EnemyKind, EnemyDef> {
       speed: s.speed,
       contactDamage: s.contactDamage,
       gemMultiplier: s.gemMultiplier,
+      ignoresObstacles: s.ignoresObstacles,
       ranged: s.ranged
         ? {
             type: s.ranged.type,
             damage: s.ranged.damage,
             cooldown: s.ranged.cooldownSec,
-            projSpeed: s.ranged.projSpeed,
+            projSpeed: s.ranged.projSpeed * psm,
             attackRange: s.ranged.attackRange,
             shellBlastRadius: s.ranged.shellBlastRadius,
           }
@@ -81,6 +88,25 @@ export function getSpawnWeights(gameTimeSec: number): SpawnWeight[] {
 }
 
 /**
+ * 在基础权重上叠乘模式系数（见 `GAME_MODE_BY_ID`）；用于 `pickSpawnKind`
+ * @param gameTimeSec - 本局已进行秒数
+ * @param mode - 开局所选模式
+ */
+export function getSpawnWeightsForMode(gameTimeSec: number, mode: GameModeId): SpawnWeight[] {
+  const base = getSpawnWeights(gameTimeSec);
+  const multTable = GAME_MODE_BY_ID[mode].spawnWeightMult;
+  const out: SpawnWeight[] = [];
+  for (const row of base) {
+    const m = multTable[row.kind] ?? 1;
+    const w = row.weight * m;
+    if (w > 0) {
+      out.push({ kind: row.kind, weight: w });
+    }
+  }
+  return out;
+}
+
+/**
  * 每分钟全体怪物生命与伤害 ×1.05（从第 0 分钟起算层数）
  * @param gameTimeSec - 本局秒数
  */
@@ -99,18 +125,23 @@ export const SPAWN_INTERVAL_START_SEC = enemyGameConfig.curve.intervalStartSec;
 export const SPAWN_INTERVAL_END_SEC = enemyGameConfig.curve.intervalEndSec;
 
 /**
- * 刷怪间隔（秒）：开局偏密、较快拉满；`t` 在 `SPAWN_RAMP_SEC` 内从 `hi` 线性落到 `lo`
+ * 刷怪间隔（秒）：前 `rampSec` 内从 `hi` 线性落到 `lo`；之后仍随现实时间略降，避免「满 5 分钟即封顶」的时长天花板
  * @param gameTimeSec - 本局秒数
  */
 export function spawnIntervalForTime(gameTimeSec: number): number {
   const { rampSec, intervalStartSec: hi, intervalEndSec: lo } = enemyGameConfig.curve;
-  const t = Math.min(1, gameTimeSec / rampSec);
-  return hi + (lo - hi) * t;
+  const g = Math.max(0, gameTimeSec);
+  if (g <= rampSec) {
+    const t = g / rampSec;
+    return hi + (lo - hi) * t;
+  }
+  const overMin = (g - rampSec) / 60;
+  return Math.max(0.028, lo * Math.pow(0.985, overMin));
 }
 
-/** 按当前时间权重随机一个可刷新兵种 */
-export function pickSpawnKind(gameTimeSec: number): EnemyKind {
-  const weights = getSpawnWeights(gameTimeSec);
+/** 按当前时间权重随机一个可刷新兵种（可选模式乘子） */
+export function pickSpawnKind(gameTimeSec: number, mode: GameModeId = 'standard'): EnemyKind {
+  const weights = getSpawnWeightsForMode(gameTimeSec, mode);
   if (weights.length === 0) {
     return 'infantry';
   }

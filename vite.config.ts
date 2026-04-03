@@ -1,5 +1,4 @@
 /** Vite 配置：React + TS，打包产物输出到 www 供 Cordova 使用 */
-import tailwindcss from '@tailwindcss/vite';
 import postcssCascadeLayers from '@csstools/postcss-cascade-layers';
 import browserslist from 'browserslist';
 import { browserslistToTargets, transform as lightningcssTransform } from 'lightningcss';
@@ -26,7 +25,7 @@ function cordovaStripCrossorigin(): Plugin {
 }
 
 /**
- * 构建结束后把外链 CSS 内联进 index.html，并对 Tailwind v4 产物做 Cordova 兼容：旧 Android System WebView（Chrome 99 以下）不认识 `@layer`，会整块丢掉工具类；先 PostCSS 展开层，再 Lightning 降级，最后去掉仍残留的 `@property`
+ * 构建结束后把外链 CSS 内联进 index.html，并做 Cordova 兼容：先 PostCSS 展开层，再 Lightning 降级，最后去掉仍残留的 `@property`
  */
 function cordovaInlineCss(outDir: string): Plugin {
   return {
@@ -77,7 +76,7 @@ function cordovaInlineCss(outDir: string): Plugin {
   };
 }
 
-/** 与旧版 Android System WebView（≈ Chrome 68+）对齐，降级 Tailwind v4 的 @property / oklab 等，避免整表解析丢弃 */
+/** 与旧版 Android System WebView（≈ Chrome 68+）对齐，降级现代 CSS 特性，避免整表解析丢弃 */
 const cordovaCssTargets = browserslistToTargets(
   browserslist('chrome >= 68, and_chr >= 68, samsung >= 8'),
 );
@@ -85,7 +84,6 @@ const cordovaCssTargets = browserslistToTargets(
 export default defineConfig({
   plugins: [
     react(),
-    tailwindcss(),
     cordovaStripCrossorigin(),
     cordovaInlineCss('www'),
   ],

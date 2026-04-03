@@ -9,6 +9,8 @@ export interface MoveInput {
   /** 摇杆 / 触摸方向 -1~1，未使用摇杆时不传 */
   analogX?: number;
   analogY?: number;
+  /** 本帧是否请求冲刺（空格按下沿 / 冲刺键点按，仅一帧为 true） */
+  dash?: boolean;
 }
 
 /** 敌人实例：字段在刷新时从表拷贝并已乘难度倍率 */
@@ -44,6 +46,13 @@ export interface Enemy {
     attackRange: number;
     blastRadius?: number;
   };
+  /** 与 `EnemyStatConfig.ignoresObstacles` 一致；飞行单位越障移动 */
+  ignoresObstacles?: boolean;
+  /**
+   * 生成时的怪物等级（与玩家等级无关）：用于击杀掉落装备箱的池上限
+   * 取 `floor(本局 gameTime/60)+1`，随分钟数无限增长（无 99 封顶）
+   */
+  level: number;
 }
 
 /** 纹理变体：砖纹横砌 / 木板竖纹 / 斜纹 / 碎石噪点 */
@@ -75,6 +84,16 @@ export interface Bullet {
    * 为 true 时不与障碍做阻挡判定（手榴弹、土炮抛物等）；步枪等普通弹体省略或 false
    */
   ignoresObstacles?: boolean;
+  /** 命中与障碍判定半径；步枪省略则用 `RIFLE_BULLET_RADIUS` */
+  hitRadius?: number;
+  /** 还可命中的敌人数；首中后若 >0 弹体不销毁（穿透） */
+  hitsRemaining?: number;
+  /** 本弹已结算过伤害的敌人 `id`，避免重复命中 */
+  hitEnemyIds?: number[];
+  /** 世界层绘制色；省略则用默认金黄 */
+  displayColor?: number;
+  /** 撞土房障碍时剩余可反弹次数；由 `SurvivorGameModel.projectileBounceAdd` 在发射时写入，每反弹一次减 1，为 0 则穿障时销毁 */
+  obstacleBouncesRemaining?: number;
 }
 
 /** 敌弹：机枪弹直线命中玩家；炮弹飞至落点后范围伤害 */
@@ -97,8 +116,16 @@ export interface XpGem {
   value: number;
 }
 
-/** 地图可拾取宝箱：靠近后与宝石同拾取半径叠加判定，开启时随机应用一张升级池卡片效果 */
+/** 地图可拾取宝箱：靠近判定；限时增益箱或击杀掉落的装备箱 */
 export interface WorldChest {
   x: number;
   y: number;
+  /** `gameTime` 达到后未拾取则移除 */
+  despawnAt: number;
+  /**
+   * 省略或 `buff`：随机限时增益（与 `chestBuffs`）；`gear`：紫箱，拾取时按 `monsterLevel` 随机九部位装备词条并入库（`gearAffixConfig` / `applyPurpleChestLoot`）
+   */
+  chestKind?: 'buff' | 'gear';
+  /** 装备箱：被击杀敌人等级，影响开箱件数（1～5）与等阶（见 `gearAffixConfig`） */
+  monsterLevel?: number;
 }

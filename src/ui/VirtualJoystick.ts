@@ -3,6 +3,9 @@ import { Container, FederatedPointerEvent, Graphics, Rectangle } from 'pixi.js';
 /** 将浏览器 `clientX/clientY` 转为与 Pixi 一致的全局坐标（逻辑像素，与 `renderer.width/height` 对齐） */
 export type ClientToGlobalFn = (clientX: number, clientY: number) => { x: number; y: number };
 
+/** 底环与圆钮整体不透明度（0.5 = 半透明） */
+const JOYSTICK_VISUAL_ALPHA = 0.5;
+
 /**
  * 浮动摇杆：默认仅有一块透明激活区；按下后在与触点重合处浮现底环，锚点固定为按下点，拖动时圆钮相对锚点偏移并限制在半径内
  */
@@ -65,6 +68,7 @@ export class VirtualJoystick extends Container {
     this._drawBase();
     this._drawKnob(0, 0);
     this._stickRoot.addChild(this._base, this._knob);
+    this._stickRoot.alpha = JOYSTICK_VISUAL_ALPHA;
 
     this.addChild(this._zone, this._stickRoot);
   }
