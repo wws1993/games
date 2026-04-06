@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HashRouter, useLocation, useNavigate } from 'react-router-dom';
 
+import { resumeAudioIfNeeded, syncBgmScene } from '../game/audio/gameAudio';
 import {
   closePauseEquipmentOverlay,
   registerPauseEquipmentUi,
@@ -11,6 +12,25 @@ import { navigation } from '../utils/navigation';
 import { EquipmentPage } from './EquipmentPage';
 import { bindReactNavigate } from './shellBridge';
 import { PageTransitionStack } from './PageTransitionStack';
+
+/** 首次触摸解锁 Web Audio，并按路由切换菜单/战斗程序化 BGM */
+function AudioRouteSync(): null {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    syncBgmScene(pathname);
+  }, [pathname]);
+
+  useEffect(() => {
+    const unlock = () => {
+      void resumeAudioIfNeeded();
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
+
+  return null;
+}
 
 /** 同步路由与 Pixi 主屏、根节点指针穿透（局内交给画布） */
 function ShellSync(): null {
@@ -71,6 +91,7 @@ function GamePauseEquipmentLayer(): JSX.Element | null {
 export function App(): JSX.Element {
   return (
     <HashRouter>
+      <AudioRouteSync />
       <ShellSync />
       <GamePauseEquipmentLayer />
       <PageTransitionStack />

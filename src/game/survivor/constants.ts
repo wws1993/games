@@ -37,6 +37,9 @@ export const PLAYER_DASH_BASE_COOLDOWN_SEC = 2.35;
 /** 冲刺位移持续（秒），此段内以冲刺速度积分，再乘升级卡 `dashSpeedMult` 为有效冲刺速度 */
 export const PLAYER_DASH_BASE_DURATION_SEC = 0.125;
 
+/** 近战挥击扇形表现持续时间（秒），与命中扇面参数同步写入 `SurvivorGameModel.meleeSwing*` */
+export const MELEE_SWING_VISUAL_SEC = 0.18;
+
 /**
  * 冲刺相对普通行走的速度倍率（与 `PLAYER_BASE_SPEED * PLAYER_MOVE_SCALE * 移速倍率` 相乘后再乘 `dashSpeedMult`）
  */
@@ -73,8 +76,26 @@ export const RIFLE_BASE_DAMAGE = 12;
  */
 export const RIFLE_CRIT_BASE_MULT = 2;
 
-/** 人物初始步枪暴击几率（0～1）；局内由强化卡在此基础上累加，封顶 1 */
+/**
+ * 人物初始步枪暴击几率；局内与装备/运气/宝箱等相加，**可超过 1** 表示溢出，溢出部分在命中时转为攻击力（见 `SurvivorGameModel`）
+ */
 export const PLAYER_BASE_CRIT_CHANCE = 0.05;
+
+/** 与宝箱掉率逻辑一致：运气倍率参与换算暴击加成时的上限 */
+export const LUCK_MULT_CAP_FOR_CRIT = 1.75;
+
+/**
+ * 运气每高出 1 的倍率，换算为多少暴击率加算（与 `critChance`、步枪加算、宝箱加算同池）
+ * 例：luckMult=1.2 → +9%（0.09）
+ */
+export const LUCK_TO_CRIT_CHANCE_PER_EXCESS = 0.45;
+
+/** 将当前局 `luckMult` 转为暴击率增量（0～1），与强化卡「运气」叠乘一致 */
+export function luckCritChanceBonusFromLuckMult(luckMult: number): number {
+  const l =
+    Number.isFinite(luckMult) && luckMult > 0 ? Math.min(LUCK_MULT_CAP_FOR_CRIT, luckMult) : 1;
+  return Math.max(0, (l - 1) * LUCK_TO_CRIT_CHANCE_PER_EXCESS);
+}
 
 /** 推箱子：贴障碍且同向移动蓄满后才开始推动（秒） */
 export const OBSTACLE_PUSH_CHARGE_SEC = 1;
@@ -96,7 +117,8 @@ export const ENEMY_CONTACT_SEPARATION_PAD = 5;
 /** 经验宝石 */
 export const GEM_RADIUS = 7;
 
-export const GEM_XP_VALUE = 6;
+/** 击杀掉落经验宝石的基础数值（再乘各兵种 `gemMultiplier`） */
+export const GEM_XP_VALUE = 4;
 
 /** 新掉落宝石与已有宝石中心距小于此则合并为一条 `XpGem`，减少同堆实体数 */
 export const GEM_MERGE_RADIUS = 38;
@@ -114,7 +136,17 @@ export const CHEST_SPAWN_INTERVAL_SEC = 30;
 export const CHEST_LIFETIME_SEC = 20;
 
 /** 击杀敌人时基础掉落装备宝箱概率；随 `monsterLevel` 略升（见 `SurvivorGameModel`） */
-export const GEAR_CHEST_DROP_BASE_CHANCE = 0.042;
+export const GEAR_CHEST_DROP_BASE_CHANCE = 0.028;
+
+/** 击杀掉紫箱：等级加成系数（`1 + min(24, level) * 系数`），与 `GEAR_CHEST_DROP_BASE_CHANCE` 相乘 */
+export const GEAR_CHEST_DROP_LEVEL_COEFF = 0.014;
+
+/** 击杀掉紫箱：最终概率上限（叠幸运后仍不超过此值） */
+export const GEAR_CHEST_DROP_MAX_CHANCE = 0.085;
+
+/** 局内精英怪矢量配色：躯干 / 描边（与 `enemyKindFill` 区分） */
+export const ELITE_ENEMY_FILL = 0xb068ff;
+export const ELITE_ENEMY_STROKE = 0xffe066;
 
 /** 地道入口：碰撞/绘制用半径（世界单位） */
 export const TUNNEL_ENTRANCE_RADIUS = 20;
@@ -128,8 +160,29 @@ export const TUNNEL_FIRST_SPAWN_SEC = 96;
 /** 使用入口后，下一只入口最早出现的间隔（逻辑秒）；入口单次使用即消失 */
 export const TUNNEL_RESPAWN_AFTER_USE_SEC = 200;
 
-/** 升级所需经验：线性增长，后续可换表 */
+/** 单局角色等级上限（达到后不再升级、拾取宝石不再加经验） */
+export const PLAYER_MAX_LEVEL = 30;
+
+/** 升级难度全局倍率：分段基准经验乘此系数；「难度上涨 300%」即 +300% 基准 → 总需求 ×4；若要约三倍时长可改为 3 */
+export const XP_TO_NEXT_LEVEL_DIFFICULTY_MULT = 4;
+
+/**
+ * 当前等级升到下一级所需经验；`level` 为升级前等级（1～29）；已满级时返回 0
+ * 梯次：1～10 较轻、11～20 每级增量提高、21～29 再提高，再乘 `XP_TO_NEXT_LEVEL_DIFFICULTY_MULT` 控整体节奏
+ */
 export function xpToReachNextLevel(level: number): number {
-  return 18 + level * 12;
+  if (level >= PLAYER_MAX_LEVEL) {
+    return 0;
+  }
+  const L = Math.max(1, Math.floor(level));
+  let base: number;
+  if (L <= 10) {
+    base = 20 + L * 8;
+  } else if (L <= 20) {
+    base = 100 + (L - 10) * 16;
+  } else {
+    base = 260 + (L - 20) * 28;
+  }
+  return Math.max(1, Math.round(base * XP_TO_NEXT_LEVEL_DIFFICULTY_MULT));
 }
 

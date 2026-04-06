@@ -6,10 +6,13 @@ import {
   CHEST_LIFETIME_SEC,
   CHEST_SPAWN_INTERVAL_SEC,
   GEAR_CHEST_DROP_BASE_CHANCE,
+  GEAR_CHEST_DROP_LEVEL_COEFF,
+  GEAR_CHEST_DROP_MAX_CHANCE,
   GEM_MAX_ON_FIELD,
   GEM_MERGE_RADIUS,
   GEM_RADIUS,
   GEM_XP_VALUE,
+  luckCritChanceBonusFromLuckMult,
   PLAYER_BASE_MAX_HP,
   PLAYER_BASE_PICKUP_RADIUS,
   ENEMY_ANIM_PHASE_BASE,
@@ -19,6 +22,7 @@ import {
   PLAYER_DASH_BASE_COOLDOWN_SEC,
   PLAYER_DASH_BASE_DURATION_SEC,
   PLAYER_DASH_REL_SPEED,
+  MELEE_SWING_VISUAL_SEC,
   PLAYER_RADIUS,
   PLAYER_BASE_CRIT_CHANCE,
   OBSTACLE_PUSH_CHARGE_SEC,
@@ -33,11 +37,13 @@ import {
   WORLD_OBSTACLE_COUNT,
   WORLD_SIZE,
   WORLD_SPAWN_CLEAR_RADIUS,
+  PLAYER_MAX_LEVEL,
   xpToReachNextLevel,
 } from './constants';
 import {
   circleAabbOverlap,
   obstaclePlacementValid,
+  resolveBulletEnemyCircleBounce,
   resolveBulletObstacleBounce,
   pushCircleOutOfAabb,
   resolveCircleWithObstacles,
@@ -56,10 +62,24 @@ import {
   type PurpleProfileBonuses,
 } from '../config/purpleGearBonuses';
 import { DEFAULT_PLAYER_WEAPON_KIND } from '../config/playerWeaponsConfig';
-import { applyPurpleChestLoot, getEquippedPurplePiecesOrdered } from '../meta/achievementStore';
+import {
+  playChestPickupSfx,
+  playGemPickupSfx,
+  playMeleeSwingSfx,
+  playPlayerHurtSfx,
+  playRifleShootSfx,
+} from '../audio/gameAudio';
+import {
+  applyPurpleChestLoot,
+  getEquippedPurplePiecesOrdered,
+  getSelectedWeaponCosmetic,
+  getUnlockedWeaponKindsOrdered,
+  loadAchievementSave,
+} from '../meta/achievementStore';
 import {
   PLAYER_WEAPON_DEFS,
   PLAYER_WEAPON_ORDER,
+  type PlayerWeaponDef,
   type PlayerWeaponKind,
 } from '../config/playerWeaponsConfig';
 import {
@@ -67,6 +87,7 @@ import {
   LEVEL_UP_REVIVE_CARD_ID,
   levelUpCardTemplates,
   levelUpPickCount,
+  levelUpTemplateMatchesWeaponCategory,
   materializeLevelUpCard,
   type LevelUpCardDef,
   type LevelUpCardTemplate,
@@ -74,6 +95,12 @@ import {
 import type { GameModeId } from '../config/gameModeConfig';
 import { survivorBalance } from '../config/survivorBalance';
 import { getDevBonusMaxHp, getDevBonusRifleAttackSpeed } from '../meta/devRuntime';
+import {
+  DEFAULT_PLAYABLE_HERO_ID,
+  getPlayableHeroWeaponPassive,
+  type PlayableHeroId,
+  type PlayableHeroWeaponPassive,
+} from '../meta/playableHeroConfig';
 import {
   difficultyMultiplier,
   ENEMY_DEFS,
@@ -141,15 +168,36 @@ export class SurvivorGameModel {
   /** 步枪每轮发射子弹数（扇形散布） */
   public rifleBulletCount = 1;
 
-  /** `PLAYER_WEAPON_ORDER` 下标；默认 0 为三八式 */
+  /** `PLAYER_WEAPON_ORDER` 全局下标，与 `equippedWeaponKind` 一致；Q/E 在 `_ownedWeaponsOrdered` 内循环时同步为对应全局下标 */
   public playerWeaponIndex = 0;
 
-  /** 当前武器键（与图鉴、`PLAYER_WEAPON_DEFS` 一致） */
+  /** 当前局玩法角色 id（`syncWeaponLoadoutFromProfile` 从档案写入） */
+  public playableHeroId: PlayableHeroId = DEFAULT_PLAYABLE_HERO_ID;
+
+  /** 局外枪皮可选覆盖弹丸着色；null 时用当前武器表 `bulletColor` */
+  public cosmeticBulletColor: number | null = null;
+
+  /** 当前武器键（与 `PLAYER_WEAPON_DEFS` 一致） */
   public get equippedWeaponKind(): PlayerWeaponKind {
     return PLAYER_WEAPON_ORDER[this.playerWeaponIndex]!;
   }
 
-  /** 步枪暴击几率 0～1：`PLAYER_BASE_CRIT_CHANCE` 与「暴击Ⅰ」等卡片累加后封顶 1 */
+  /** 当前局内可用主武器种类数（仅大于 1 时显示切枪触摸键） */
+  public get ownedWeaponCount(): number {
+    return this._ownedWeaponsOrdered.length;
+  }
+
+  /** 当前武器弹匣内剩余弹量（一发对应一次齐射） */
+  public get rifleMagAmmo(): number {
+    return this._weaponMagAmmo[this.equippedWeaponKind] ?? 0;
+  }
+
+  /** 当前武器弹匣容量 */
+  public get rifleMagazineSize(): number {
+    return PLAYER_WEAPON_DEFS[this.equippedWeaponKind].magazineSize;
+  }
+
+  /** 步枪暴击率加算池（基础+装备+被动等，**可>1** 供溢出转攻）；命中时再与宝箱/步枪加算/运气/铁血 */
   public critChance = PLAYER_BASE_CRIT_CHANCE;
 
   /**
@@ -223,10 +271,16 @@ export class SurvivorGameModel {
   /** 击杀敌人固定回血 */
   public killHealAdd = 0;
 
+  /** 弹幕套：步枪齐射额外弹丸（与 `rifleBulletCount`、二连发层数相加） */
+  public profileDanmuBulletAdd = 0;
+
+  /** 血契 9 件：击杀回复 = `killHealAdd` + 最大生命 × 本比例 */
+  public profileKillHealMaxHpPct = 0;
+
   /** 冲刺冷却倍率（小于 1 缩短冷却）；冲刺系统接入后读取 */
   public dashCooldownMult = 1;
 
-  /** 子弹反弹次数加算；与障碍碰撞时消耗，见 `Bullet.obstacleBouncesRemaining` */
+  /** 子弹反弹次数加算；撞土房或穿透用尽时撞敌人反弹均消耗，见 `Bullet.obstacleBouncesRemaining` */
   public projectileBounceAdd = 0;
 
   /** 步枪伤害倍率（叠在全局 `damageMultiplier` 与宝箱伤增上） */
@@ -265,8 +319,28 @@ export class SurvivorGameModel {
   /** 存活时间（秒） */
   public gameTime = 0;
 
-  /** 步枪冷却剩余（秒） */
+  /** 步枪冷却剩余（秒）；换弹进行中时不递减 */
   public rifleCooldown = 0;
+
+  /**
+   * 当前武器换弹剩余时间（秒）。>0 时不能射击；结束后将当前武器弹匣压满
+   */
+  public rifleReloadRemaining = 0;
+
+  /** 当前换弹段总时长（秒），与 `rifleReloadRemaining` 同起点；用于 HUD 换弹条进度 */
+  public rifleReloadTotalSec = 0;
+
+  /** 近战挥击扇形表现剩余时间（秒）；>0 时 `PlayerWorldVisual` 绘制挥舞扇形 */
+  public meleeSwingVisualRemain = 0;
+
+  /** 本次挥击的扇形半角（弧度），与 `_performMeleeSwing` 内 `halfArc` 一致 */
+  public meleeSwingArcHalfRad = 0;
+
+  /** 本次挥击的扇形外缘半径（世界单位），与命中用 `mr` 一致 */
+  public meleeSwingRangePx = 0;
+
+  /** 各主武器弹匣剩余弹量（与 `PLAYER_WEAPON_ORDER` 键一致） */
+  private _weaponMagAmmo: Record<PlayerWeaponKind, number> = {} as Record<PlayerWeaponKind, number>;
 
   /** 距离下次刷怪（秒） */
   public spawnTimer = 0;
@@ -334,7 +408,7 @@ export class SurvivorGameModel {
   /** 受击伤害再乘算 */
   public chestBuffDamageTakenMult = 1;
 
-  /** 叠在暴击率上（命中时再与 `critChance` 相加并封顶 1） */
+  /** 叠在暴击率上，与运气/被动等相加；总和可超 1，溢出转攻（见 `_applyPrimaryWeaponDamageToEnemy`） */
   public chestBuffCritChanceBonus = 0;
 
   /** 拾取圈半径加算 */
@@ -387,7 +461,7 @@ export class SurvivorGameModel {
 
   private _nextEnemyId = 1;
 
-  /** 局内主武器列表（无军功商店时仅默认步枪）；Q/E 在此列表循环 */
+  /** 局内主武器列表；Q/E 在此列表循环 */
   private _ownedWeaponsOrdered: PlayerWeaponKind[] = [DEFAULT_PLAYER_WEAPON_KIND];
 
   /** 本局已叠乘的紫装词条聚合，供 `syncGearLoadoutFromProfileMidRun` 卸装 */
@@ -395,13 +469,45 @@ export class SurvivorGameModel {
 
   /** 档案紫装提供的步枪索敌射程加算（世界单位） */
   public profileRifleRangeAdd = 0;
+  /** 紫装穿透几率加总；齐射时一次判定 */
+  public profilePierceChanceAdd = 0;
+  /** 紫装「低血伤害」乘子，与升级卡 `lowHpDamageMult` 相乘 */
+  public profileLowHpDamageMult = 1;
+  /** 紫装吸血加算（稀有），与升级卡相加 */
+  public profileLifestealAdd = 0;
+  /** 宝箱限时增益时长乘子 */
+  public profileChestBuffDurationMult = 1;
+  /** 幻影：首次受伤抵消比例 */
+  public profilePhantomMitigatePct = 0;
+  /** 守护者：当前可吸收剩余量 */
+  public profileGuardianShield = 0;
+  /** 守护者：上限（随装备刷新） */
+  public profileGuardianShieldMax = 0;
+  /** 二连发层数 */
+  public profileDoubleTapStacks = 0;
+  /** 击杀溅射层数 */
+  public profileShrapnelStacks = 0;
+  /** 铁血 9：低血额外暴击率 */
+  public profileSetTiexueLowCritAdd = 0;
+  /** 首次抵消是否已消耗 */
+  private _phantomMitigationUsed = false;
 
   /**
    * 从本地档案同步拥有列表与当前装备（`GameScreen.prepare` 在 `reset` 后调用）
    */
   public syncWeaponLoadoutFromProfile(): void {
-    this._ownedWeaponsOrdered = [DEFAULT_PLAYER_WEAPON_KIND];
-    this.playerWeaponIndex = 0;
+    const save = loadAchievementSave();
+    this.playableHeroId = save.selectedPlayableHeroId;
+    const kinds = getUnlockedWeaponKindsOrdered(save);
+    this._ownedWeaponsOrdered = kinds.length > 0 ? kinds : [DEFAULT_PLAYER_WEAPON_KIND];
+    const first = this._ownedWeaponsOrdered[0]!;
+    const gi = PLAYER_WEAPON_ORDER.indexOf(first);
+    this.playerWeaponIndex = gi >= 0 ? gi : 0;
+    const cos = getSelectedWeaponCosmetic(save);
+    this.cosmeticBulletColor = cos.bulletColor;
+    this._fillWeaponMagsFull();
+    this.rifleReloadRemaining = 0;
+    this.rifleReloadTotalSec = 0;
   }
 
   /**
@@ -415,7 +521,7 @@ export class SurvivorGameModel {
       this.playerHp += b.maxHpAdd;
     }
     this.moveSpeedMultiplier *= b.moveSpeedMult;
-    this.critChance = Math.min(1, Math.max(0, this.critChance + b.critChanceAdd));
+    this.critChance = Math.max(0, this.critChance + b.critChanceAdd + b.focusCritChanceAdd);
     this.pickupRadius += b.pickupRadiusAdd;
     this.rifleAttackSpeedMult *= b.rifleAttackSpeedMult;
     this.rifleDamageMult *= b.rifleDamageMult;
@@ -424,6 +530,21 @@ export class SurvivorGameModel {
     this.expMult *= b.expMult;
     this.profileRifleRangeAdd += b.rifleRangeAdd;
     this.luckMult *= b.luckMult;
+    this.critOnHitDamageMult *= b.setYexiCritDamageMult;
+    this.profilePierceChanceAdd = b.pierceChanceAdd;
+    this.profileLowHpDamageMult = b.profileLowHpDamageMult;
+    this.lifestealAdd += b.profileLifestealAdd;
+    this.profileLifestealAdd = b.profileLifestealAdd;
+    this.profileChestBuffDurationMult = b.chestBuffDurationMult;
+    this.profilePhantomMitigatePct = b.phantomMitigatePct;
+    this.profileGuardianShieldMax = Math.max(0, b.guardianStacks * 22);
+    this.profileGuardianShield = this.profileGuardianShieldMax;
+    this.profileDoubleTapStacks = b.doubleTapStacks;
+    this.profileShrapnelStacks = b.shrapnelStacks;
+    this.profileSetTiexueLowCritAdd = b.setTiexueNineLowCritAdd;
+    this.thornsDamageMult *= b.profileThornsDamageMult;
+    this.profileDanmuBulletAdd = b.profileDanmuBulletAdd;
+    this.profileKillHealMaxHpPct = b.profileKillHealMaxHpPct;
     this._appliedPurpleBonuses = { ...b };
   }
 
@@ -448,8 +569,8 @@ export class SurvivorGameModel {
     this.playerHp = Math.min(this.playerHp, this.playerMaxHp);
     this.playerHp = Math.max(0, this.playerHp);
     this.moveSpeedMultiplier = safeDiv(this.moveSpeedMultiplier, old.moveSpeedMult) * neu.moveSpeedMult;
-    this.critChance -= old.critChanceAdd;
-    this.critChance = Math.min(1, Math.max(0, this.critChance + neu.critChanceAdd));
+    this.critChance -= old.critChanceAdd + old.focusCritChanceAdd;
+    this.critChance = Math.max(0, this.critChance + neu.critChanceAdd + neu.focusCritChanceAdd);
     this.pickupRadius -= old.pickupRadiusAdd;
     this.pickupRadius += neu.pickupRadiusAdd;
     this.rifleAttackSpeedMult = safeDiv(this.rifleAttackSpeedMult, old.rifleAttackSpeedMult) * neu.rifleAttackSpeedMult;
@@ -461,6 +582,27 @@ export class SurvivorGameModel {
     this.profileRifleRangeAdd -= old.rifleRangeAdd;
     this.profileRifleRangeAdd += neu.rifleRangeAdd;
     this.luckMult = safeDiv(this.luckMult, old.luckMult) * neu.luckMult;
+    this.critOnHitDamageMult = safeDiv(this.critOnHitDamageMult, old.setYexiCritDamageMult) * neu.setYexiCritDamageMult;
+    this.profilePierceChanceAdd = neu.pierceChanceAdd;
+    this.profileLowHpDamageMult = neu.profileLowHpDamageMult;
+    this.lifestealAdd -= old.profileLifestealAdd;
+    this.lifestealAdd += neu.profileLifestealAdd;
+    this.profileLifestealAdd = neu.profileLifestealAdd;
+    this.profileChestBuffDurationMult = neu.chestBuffDurationMult;
+    this.profilePhantomMitigatePct = neu.phantomMitigatePct;
+    const oldG = Math.max(0, old.guardianStacks * 22);
+    const newG = Math.max(0, neu.guardianStacks * 22);
+    this.profileGuardianShieldMax = newG;
+    this.profileGuardianShield = Math.min(
+      newG,
+      this.profileGuardianShield + Math.max(0, newG - oldG),
+    );
+    this.profileDoubleTapStacks = neu.doubleTapStacks;
+    this.profileShrapnelStacks = neu.shrapnelStacks;
+    this.profileSetTiexueLowCritAdd = neu.setTiexueNineLowCritAdd;
+    this.thornsDamageMult = safeDiv(this.thornsDamageMult, old.profileThornsDamageMult) * neu.profileThornsDamageMult;
+    this.profileDanmuBulletAdd = neu.profileDanmuBulletAdd;
+    this.profileKillHealMaxHpPct = neu.profileKillHealMaxHpPct;
     this._appliedPurpleBonuses = { ...neu };
   }
 
@@ -483,8 +625,10 @@ export class SurvivorGameModel {
     this.moveSpeedMultiplier = 1;
     this.rifleAttackSpeedMult = 1 + getDevBonusRifleAttackSpeed();
     this.rifleBulletCount = 1;
+    this.playableHeroId = DEFAULT_PLAYABLE_HERO_ID;
     this._ownedWeaponsOrdered = [DEFAULT_PLAYER_WEAPON_KIND];
     this.playerWeaponIndex = 0;
+    this.cosmeticBulletColor = null;
     this.critChance = PLAYER_BASE_CRIT_CHANCE;
     this.critOnHitDamageMult = 1;
     this.canPushObstacles = false;
@@ -509,11 +653,25 @@ export class SurvivorGameModel {
     this.thornsDamageMult = 1;
     this.rifleBulletSpeedMult = 1;
     this.killHealAdd = 0;
+    this.profileDanmuBulletAdd = 0;
+    this.profileKillHealMaxHpPct = 0;
     this.dashCooldownMult = 1;
     this.projectileBounceAdd = 0;
     this.rifleDamageMult = 1;
     this.profileBulletRadiusMult = 1;
     this.profileRifleRangeAdd = 0;
+    this.profilePierceChanceAdd = 0;
+    this.profileLowHpDamageMult = 1;
+    this.profileLifestealAdd = 0;
+    this.profileChestBuffDurationMult = 1;
+    this.profilePhantomMitigatePct = 0;
+    this.profileGuardianShield = 0;
+    this.profileGuardianShieldMax = 0;
+    this.profileDoubleTapStacks = 0;
+    this.profileShrapnelStacks = 0;
+    this.profileSetTiexueLowCritAdd = 0;
+    this._phantomMitigationUsed = false;
+    this._appliedPurpleBonuses = null;
     this.rifleCritChanceAdd = 0;
     this.rifleReloadSpeedMult = 1;
     this.dashSpeedMult = 1;
@@ -529,6 +687,12 @@ export class SurvivorGameModel {
     this.xp = 0;
     this.gameTime = 0;
     this.rifleCooldown = 0;
+    this.rifleReloadRemaining = 0;
+    this.rifleReloadTotalSec = 0;
+    this.meleeSwingVisualRemain = 0;
+    this.meleeSwingArcHalfRad = 0;
+    this.meleeSwingRangePx = 0;
+    this._fillWeaponMagsFull();
     this.spawnTimer = 0.18;
     this.spawnInterval = SPAWN_INTERVAL_START_SEC;
     this.paused = false;
@@ -565,13 +729,15 @@ export class SurvivorGameModel {
   }
 
   /**
-   * 键盘 Q/E 循环切换主武器；阵亡、暂停、升级三选一时不切换
+   * 循环切换主武器（触摸键）；阵亡、暂停、升级三选一时不切换
    * @param delta - -1 上一把、+1 下一把
    */
   public cycleWeapon(delta: number): void {
     if (delta === 0 || this.gameOver || this.paused || this.manualPaused || this.awaitingLevelUp) {
       return;
     }
+    this.rifleReloadRemaining = 0;
+    this.rifleReloadTotalSec = 0;
     const list = this._ownedWeaponsOrdered;
     if (list.length <= 1) {
       return;
@@ -588,6 +754,57 @@ export class SurvivorGameModel {
   }
 
   /**
+   * 手动换弹（触摸「换弹」）；未满匣或打空后均可，战术换弹时长按缺弹比例折算
+   */
+  public requestWeaponReload(): void {
+    if (this.gameOver || this.paused || this.manualPaused || this.awaitingLevelUp) {
+      return;
+    }
+    if (PLAYER_WEAPON_DEFS[this.equippedWeaponKind].category === 'melee') {
+      return;
+    }
+    if (this.rifleReloadRemaining > 0) {
+      return;
+    }
+    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
+    const cur = this._weaponMagAmmo[this.equippedWeaponKind] ?? 0;
+    if (cur >= w.magazineSize) {
+      return;
+    }
+    this._startMagReloadForEquipped();
+  }
+
+  /** 将全表武器弹匣压满（新局 / 档案同步） */
+  private _fillWeaponMagsFull(): void {
+    for (const k of PLAYER_WEAPON_ORDER) {
+      this._weaponMagAmmo[k] = PLAYER_WEAPON_DEFS[k].magazineSize;
+    }
+  }
+
+  /** 按当前武器缺弹比例开始换弹，乘 `rifleReloadSpeedMult`；近战无读条，仅瞬间满弹 */
+  private _startMagReloadForEquipped(): void {
+    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
+    if (w.category === 'melee') {
+      this._weaponMagAmmo[this.equippedWeaponKind] = w.magazineSize;
+      this.rifleReloadRemaining = 0;
+      this.rifleReloadTotalSec = 0;
+      return;
+    }
+    const cur = this._weaponMagAmmo[this.equippedWeaponKind] ?? 0;
+    if (cur >= w.magazineSize) {
+      return;
+    }
+    const miss = w.magazineSize - cur;
+    const frac = miss / w.magazineSize;
+    const hp = this._heroWeaponPassive();
+    const rlm =
+      (Number.isFinite(this.rifleReloadSpeedMult) && this.rifleReloadSpeedMult > 0 ? this.rifleReloadSpeedMult : 1) *
+      hp.reloadSpeedMul;
+    this.rifleReloadRemaining = (w.reloadSec * frac) / rlm;
+    this.rifleReloadTotalSec = this.rifleReloadRemaining;
+  }
+
+  /**
    * 单帧推进：输入移动、刷怪、索敌射击、弹道、碰撞、拾取与升级检测
    * @param dt - 帧间隔（秒）
    * @param input - 键盘合成方向
@@ -601,6 +818,9 @@ export class SurvivorGameModel {
     this._rifleFocusTargetCached = false;
     this._lastFrameDt = dt;
     this.gameTime += dt;
+    if (this.meleeSwingVisualRemain > 0) {
+      this.meleeSwingVisualRemain = Math.max(0, this.meleeSwingVisualRemain - dt);
+    }
     this._pruneWorldChestsExpired();
     this._tickChestBuffs();
     const scale = survivorBalance.spawn.intervalScale;
@@ -664,8 +884,6 @@ export class SurvivorGameModel {
       this.rifleAttackSpeedMult *= ef.factor;
     } else if (ef.kind === 'rifleBulletCount') {
       this.rifleBulletCount = Math.max(1, Math.floor(this.rifleBulletCount + ef.add));
-    } else if (ef.kind === 'critChanceAdd') {
-      this.critChance = Math.min(1, Math.max(0, this.critChance + ef.add));
     } else if (ef.kind === 'critOnHitDamageMult') {
       const f = ef.factor;
       this.critOnHitDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
@@ -715,8 +933,6 @@ export class SurvivorGameModel {
     } else if (ef.kind === 'rifleDamageMult') {
       const f = ef.factor;
       this.rifleDamageMult *= Number.isFinite(f) && f > 0 ? f : 1;
-    } else if (ef.kind === 'rifleCritChanceAdd') {
-      this.rifleCritChanceAdd = Math.min(1, Math.max(0, this.rifleCritChanceAdd + ef.add));
     } else if (ef.kind === 'rifleReloadSpeedMult') {
       const f = ef.factor;
       this.rifleReloadSpeedMult *= Number.isFinite(f) && f > 0 ? f : 1;
@@ -734,13 +950,22 @@ export class SurvivorGameModel {
     }
   }
 
-  /** 与 `_rollLevelUpCards` 相同过滤规则（已持有推箱子 / 已拿过复活卡则剔除对应模板） */
+  /** 与 `_rollLevelUpCards` 相同过滤规则（推箱子/复活一次、按主武器近战/射击池互斥，见 `levelUpTemplateMatchesWeaponCategory`） */
   private _eligibleLevelUpPool(): LevelUpCardTemplate[] {
-    return levelUpCardTemplates.filter(
-      (c) =>
-        !(c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles) &&
-        !(c.id === LEVEL_UP_REVIVE_CARD_ID && this._reviveOfferTaken),
-    );
+    const weaponCat =
+      PLAYER_WEAPON_DEFS[this.equippedWeaponKind].category === 'melee' ? 'melee' : 'ranged';
+    return levelUpCardTemplates.filter((c) => {
+      if (c.id === LEVEL_UP_PUSH_CARD_ID && this.canPushObstacles) {
+        return false;
+      }
+      if (c.id === LEVEL_UP_REVIVE_CARD_ID && this._reviveOfferTaken) {
+        return false;
+      }
+      if (!levelUpTemplateMatchesWeaponCategory(c, weaponCat)) {
+        return false;
+      }
+      return true;
+    });
   }
 
   /** `despawnAt` 到期的地图宝箱移除 */
@@ -840,7 +1065,11 @@ export class SurvivorGameModel {
   /** 拾取宝箱道具：同种刷新持续时间 */
   private _applyChestBuff(kind: ChestBuffKind): void {
     const def = CHEST_BUFF_DEFS[kind];
-    const until = this.gameTime + def.durationSec;
+    const durM =
+      Number.isFinite(this.profileChestBuffDurationMult) && this.profileChestBuffDurationMult > 0
+        ? this.profileChestBuffDurationMult
+        : 1;
+    const until = this.gameTime + def.durationSec * durM;
     const arr = this._activeChestBuffs;
     const idx = arr.findIndex((r) => r.kind === kind);
     if (idx >= 0) {
@@ -862,7 +1091,7 @@ export class SurvivorGameModel {
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + r * dt);
   }
 
-  /** 升级卡「慢慢回血」等：与宝箱秒回并行 */
+  /** 升级卡「慢慢回血」等：与宝箱秒回并行；`regenAdd` 为各卡数值之和（秒），多张叠加由 `levelUpCardsConfig` 控上限 */
   private _applyLevelUpCardRegen(dt: number): void {
     const r = this.regenAdd;
     if (r <= 0 || !Number.isFinite(r)) {
@@ -930,6 +1159,7 @@ export class SurvivorGameModel {
         continue;
       }
       this.chests.splice(i, 1);
+      playChestPickupSfx();
       if (ch.chestKind === 'gear') {
         const lv = ch.monsterLevel ?? 1;
         const r = applyPurpleChestLoot(lv);
@@ -948,7 +1178,7 @@ export class SurvivorGameModel {
     }
   }
 
-  /** 本级升到下一级所需经验 */
+  /** 本级升到下一级所需经验；已达 `PLAYER_MAX_LEVEL` 时为 0 */
   public get xpToNext(): number {
     return xpToReachNextLevel(this.level);
   }
@@ -958,7 +1188,13 @@ export class SurvivorGameModel {
     if (this.awaitingLevelUp) {
       return;
     }
+    if (this.level >= PLAYER_MAX_LEVEL) {
+      return;
+    }
     const need = xpToReachNextLevel(this.level);
+    if (need <= 0) {
+      return;
+    }
     if (this.xp >= need) {
       this.xp -= need;
       this.level += 1;
@@ -1183,8 +1419,17 @@ export class SurvivorGameModel {
     const esp = survivorBalance.enemy.moveSpeedScale;
     const enemySpeedMul = Number.isFinite(esp) && esp > 0 ? esp : 1;
 
-    const hp = def.baseHp * mul;
-    const contactDamage = def.contactDamage * mul;
+    const eliteCfg = survivorBalance.enemy.elite;
+    const isElite =
+      Number.isFinite(eliteCfg.spawnChance) &&
+      eliteCfg.spawnChance > 0 &&
+      Math.random() < eliteCfg.spawnChance;
+    const hpMul = isElite && Number.isFinite(eliteCfg.hpMult) && eliteCfg.hpMult > 0 ? eliteCfg.hpMult : 1;
+    const atkMul =
+      isElite && Number.isFinite(eliteCfg.attackMult) && eliteCfg.attackMult > 0 ? eliteCfg.attackMult : 1;
+
+    let hp = def.baseHp * mul * hpMul;
+    let contactDamage = def.contactDamage * mul * atkMul;
     const gemValue = Math.max(1, Math.round(GEM_XP_VALUE * def.gemMultiplier));
 
     let fvx = this.playerX - x;
@@ -1196,7 +1441,7 @@ export class SurvivorGameModel {
     let ranged: Enemy['ranged'];
     let rangedCd = 0;
     if (def.ranged) {
-      const rd = def.ranged.damage * mul;
+      const rd = def.ranged.damage * mul * atkMul;
       ranged = {
         type: def.ranged.type,
         damage: rd,
@@ -1229,6 +1474,7 @@ export class SurvivorGameModel {
       ranged,
       ignoresObstacles: def.ignoresObstacles === true,
       level: enemyLevel,
+      isElite: isElite ? true : undefined,
     });
   }
 
@@ -1269,13 +1515,20 @@ export class SurvivorGameModel {
     return { x: dx / len, y: dy / len };
   }
 
+  /** 当前玩法角色与主武器绑定的被动乘区（攻速/换弹/移速/伤害/暴击） */
+  private _heroWeaponPassive(): PlayableHeroWeaponPassive {
+    return getPlayableHeroWeaponPassive(this.playableHeroId, this.equippedWeaponKind);
+  }
+
   /** 普通行走世界速度（单位/秒） */
   private _walkSpeedWorldPerSec(): number {
+    const hp = this._heroWeaponPassive();
     return (
       PLAYER_BASE_SPEED *
       PLAYER_MOVE_SCALE *
       this.moveSpeedMultiplier *
-      this.chestBuffMoveSpeedMult
+      this.chestBuffMoveSpeedMult *
+      hp.moveSpeedMul
     );
   }
 
@@ -1574,12 +1827,13 @@ export class SurvivorGameModel {
     }
   }
 
-  /** 步枪射程内距离玩家最近的敌人；与 `_rifleTick`、瞄准表现共用 */
+  /** 步枪射程内距离玩家最近的敌人；与 `_rifleTick`、瞄准表现共用；射程取自当前武器 `focusRangePx` 与升级加算 */
   private _pickRifleFocusTarget(): Enemy | undefined {
     if (this._rifleFocusTargetCached) {
       return this._rifleFocusTargetCache;
     }
-    const baseR = survivorBalance.rifle.maxRange;
+    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
+    const baseR = w.focusRangePx;
     const maxR =
       (Number.isFinite(baseR) && baseR > 0 ? baseR : 420) +
       (Number.isFinite(this.profileRifleRangeAdd) ? this.profileRifleRangeAdd : 0);
@@ -1601,6 +1855,115 @@ export class SurvivorGameModel {
     this._rifleFocusTargetCached = true;
     this._rifleFocusTargetCache = best;
     return best;
+  }
+
+  /**
+   * 步枪/近战共用的单次命中结算：暴击、低血加成、吸血、扣血与击杀（不含弹体穿透/反弹）
+   * @param e - 受击敌人
+   * @param baseDamage - 未暴击前的伤害（已含武器倍率与全局乘子）
+   * @param projectileHeroCritAdd - 子弹命中时传入发射快照（`Bullet.heroCritChanceAdd`）；省略则近战，使用当前主武器被动暴击加算
+   */
+  private _applyPrimaryWeaponDamageToEnemy(e: Enemy, baseDamage: number, projectileHeroCritAdd?: number): void {
+    let dmg = baseDamage;
+    const lowFrac = this.playerMaxHp > 1e-6 ? this.playerHp / this.playerMaxHp : 1;
+    const tiexLowCrit =
+      lowFrac <= 0.3 ? Math.min(1, Math.max(0, this.profileSetTiexueLowCritAdd)) : 0;
+    const heroCritPortion =
+      projectileHeroCritAdd !== undefined ? projectileHeroCritAdd : this._heroWeaponPassive().critChanceAdd;
+    const luckCrit = luckCritChanceBonusFromLuckMult(this.luckMult);
+    const rawCrit =
+      this.critChance +
+      this.chestBuffCritChanceBonus +
+      this.rifleCritChanceAdd +
+      tiexLowCrit +
+      heroCritPortion +
+      luckCrit;
+    const effCrit = Math.min(1, Math.max(0, rawCrit));
+    const critOverflow = Math.max(0, rawCrit - 1);
+    dmg *= 1 + critOverflow;
+    const isCrit = effCrit > 0 && Math.random() < effCrit;
+    if (isCrit) {
+      dmg *= RIFLE_CRIT_BASE_MULT;
+      const ex = this.critOnHitDamageMult;
+      dmg *= Number.isFinite(ex) && ex > 0 ? ex : 1;
+    }
+    if (lowFrac <= 0.3) {
+      const lm = this.lowHpDamageMult;
+      if (Number.isFinite(lm) && lm > 0) {
+        dmg *= lm;
+      }
+      const plm = this.profileLowHpDamageMult;
+      if (Number.isFinite(plm) && plm > 0) {
+        dmg *= plm;
+      }
+    }
+    e.hp -= dmg;
+    let ls = this.chestBuffLifestealRatio + this.lifestealAdd;
+    if (isCrit) {
+      ls += this.critLifestealAdd;
+    }
+    if (ls > 0 && Number.isFinite(ls)) {
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + dmg * ls);
+    }
+    if (e.hp <= 0) {
+      this._onEnemyKilled(e);
+    }
+  }
+
+  /**
+   * 近战挥击：以索敌方向为扇心，`meleeRangePx` 与 `meleeArcHalfRad` 内由近及远对扇区内每名敌人各造成一次伤害（近战穿透：不受子弹穿透数值限制）
+   * @param bonusPellets - 升级「散射」加宽扇面；`dtap` 为连发叠层额外加宽
+   */
+  private _performMeleeSwing(
+    w: PlayerWeaponDef,
+    focusTarget: Enemy,
+    dmgPer: number,
+    bonusPellets: number,
+    dtap: number,
+  ): void {
+    const px = this.playerX;
+    const py = this.playerY;
+    const dx0 = focusTarget.x - px;
+    const dy0 = focusTarget.y - py;
+    const aimAng = Math.atan2(dy0, dx0);
+    const halfBase = w.meleeArcHalfRad ?? Math.PI / 3;
+    const halfArc = halfBase + bonusPellets * 0.035 + dtap * 0.04;
+    const mr =
+      Number.isFinite(w.meleeRangePx) && (w.meleeRangePx ?? 0) > 0 ? (w.meleeRangePx as number) : 90;
+    const candidates: { e: Enemy; d2: number }[] = [];
+    for (const e of this.enemies) {
+      if (e.hp <= 0) {
+        continue;
+      }
+      const dx = e.x - px;
+      const dy = e.y - py;
+      const dist = Math.hypot(dx, dy);
+      if (dist > mr + e.radius) {
+        continue;
+      }
+      const ea = Math.atan2(dy, dx);
+      let ad = ea - aimAng;
+      while (ad > Math.PI) {
+        ad -= Math.PI * 2;
+      }
+      while (ad < -Math.PI) {
+        ad += Math.PI * 2;
+      }
+      if (Math.abs(ad) > halfArc) {
+        continue;
+      }
+      candidates.push({ e, d2: dist * dist });
+    }
+    candidates.sort((a, b) => a.d2 - b.d2);
+    for (const { e } of candidates) {
+      if (e.hp <= 0) {
+        continue;
+      }
+      this._applyPrimaryWeaponDamageToEnemy(e, dmgPer);
+    }
+    this.meleeSwingVisualRemain = MELEE_SWING_VISUAL_SEC;
+    this.meleeSwingArcHalfRad = halfArc;
+    this.meleeSwingRangePx = mr;
   }
 
   /** 每帧刷新 `playerAim`：有索敌目标则指向目标，否则回退为移动朝向 */
@@ -1630,37 +1993,98 @@ export class SurvivorGameModel {
     this.playerAimY = ay;
   }
 
-  /** 冷却结束则按当前武器表朝射程内最近敌人发射弹丸（多发扇形、穿透、着色由表驱动） */
+  /** 换弹计时、弹匣扣发与射击间隔；近战不扣弹、无换弹段，挥击间隔只吃射速（不吃换弹速度） */
   private _rifleTick(dt: number): void {
+    if (this.rifleReloadRemaining > 0) {
+      this.rifleReloadRemaining -= dt;
+      if (this.rifleReloadRemaining <= 0) {
+        this.rifleReloadRemaining = 0;
+        this.rifleReloadTotalSec = 0;
+        const k = this.equippedWeaponKind;
+        this._weaponMagAmmo[k] = PLAYER_WEAPON_DEFS[k].magazineSize;
+      }
+      if (this.rifleReloadRemaining > 0) {
+        return;
+      }
+    }
+
+    const wPre = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
+    if (wPre.category === 'melee') {
+      this._weaponMagAmmo[this.equippedWeaponKind] = wPre.magazineSize;
+      this.rifleReloadRemaining = 0;
+      this.rifleReloadTotalSec = 0;
+    }
+
     this.rifleCooldown -= dt;
     if (this.rifleCooldown > 0) {
       return;
     }
+
+    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
+    const ammo = this._weaponMagAmmo[this.equippedWeaponKind] ?? 0;
+
     const best = this._pickRifleFocusTarget();
     if (!best) {
       this.rifleCooldown = 0;
+      if (ammo <= 0 && this.rifleReloadRemaining <= 0) {
+        this._startMagReloadForEquipped();
+      }
       return;
     }
-    const w = PLAYER_WEAPON_DEFS[this.equippedWeaponKind];
-    const dx0 = best.x - this.playerX;
-    const dy0 = best.y - this.playerY;
-    const baseAng = Math.atan2(dy0, dx0);
+
+    if (ammo <= 0) {
+      if (this.rifleReloadRemaining <= 0) {
+        this._startMagReloadForEquipped();
+      }
+      return;
+    }
+
+    if (w.category !== 'melee') {
+      this._weaponMagAmmo[this.equippedWeaponKind] = ammo - 1;
+    }
+
     const asp = this.rifleAttackSpeedMult;
     const safeAsp = Number.isFinite(asp) && asp > 0 ? asp : 1;
     const bonusPellets = Math.max(0, Math.floor(this.rifleBulletCount) - 1);
+    const dtap = Math.max(0, Math.floor(this.profileDoubleTapStacks));
+    const danmu = Math.max(0, Math.floor(this.profileDanmuBulletAdd));
+    const pierce =
+      Math.max(0, Math.floor(w.pierceExtra)) + Math.max(0, Math.floor(this.projectilePierceAdd));
+    const pc = Math.min(1, Math.max(0, this.profilePierceChanceAdd));
+    const pierceRoll = pc > 0 && Math.random() < pc ? 1 : 0;
+    const hits0 = 1 + pierce + pierceRoll;
+    const rdm = Number.isFinite(this.rifleDamageMult) && this.rifleDamageMult > 0 ? this.rifleDamageMult : 1;
+    const hp = this._heroWeaponPassive();
+    const dmgPer =
+      RIFLE_BASE_DAMAGE *
+      w.damageMult *
+      this.damageMultiplier *
+      this.chestBuffDamageDealtMult *
+      rdm *
+      hp.damageMul;
+    const cdScale = Number.isFinite(w.cooldownScale) && w.cooldownScale > 0 ? w.cooldownScale : 1;
+    const rlm = Number.isFinite(this.rifleReloadSpeedMult) && this.rifleReloadSpeedMult > 0 ? this.rifleReloadSpeedMult : 1;
+    const aspEff = safeAsp * hp.attackSpeedMul;
+    const rlmEff = rlm * hp.reloadSpeedMul;
+
+    if (w.category === 'melee') {
+      this._performMeleeSwing(w, best, dmgPer, bonusPellets, dtap);
+      playMeleeSwingSfx();
+      this.rifleCooldown =
+        (RIFLE_COOLDOWN_SEC * cdScale * this.chestBuffRifleCooldownMult) / aspEff;
+      return;
+    }
+
+    const dx0 = best.x - this.playerX;
+    const dy0 = best.y - this.playerY;
+    const baseAng = Math.atan2(dy0, dx0);
     const n = Math.max(
       1,
-      Math.min(12, Math.floor(w.baseBulletCount + bonusPellets)),
+      Math.min(12, Math.floor(w.baseBulletCount + bonusPellets + dtap + danmu)),
     );
     const spread = n <= 1 ? 0 : w.spreadRad;
     const bsm = Number.isFinite(this.rifleBulletSpeedMult) && this.rifleBulletSpeedMult > 0 ? this.rifleBulletSpeedMult : 1;
     const spd = RIFLE_BULLET_SPEED * w.bulletSpeedMult * bsm;
-    const pierce =
-      Math.max(0, Math.floor(w.pierceExtra)) + Math.max(0, Math.floor(this.projectilePierceAdd));
-    const hits0 = 1 + pierce;
-    const rdm = Number.isFinite(this.rifleDamageMult) && this.rifleDamageMult > 0 ? this.rifleDamageMult : 1;
-    const dmgPer =
-      RIFLE_BASE_DAMAGE * w.damageMult * this.damageMultiplier * this.chestBuffDamageDealtMult * rdm;
     const pbr = Number.isFinite(this.profileBulletRadiusMult) && this.profileBulletRadiusMult > 0 ? this.profileBulletRadiusMult : 1;
     const hitR =
       RIFLE_BULLET_RADIUS * w.bulletRadiusMult * this.chestBuffBulletRadiusMult * pbr;
@@ -1678,14 +2102,14 @@ export class SurvivorGameModel {
         hitRadius: hitR,
         hitsRemaining: hits0,
         hitEnemyIds: [],
-        displayColor: w.bulletColor,
+        displayColor: this.cosmeticBulletColor ?? w.bulletColor,
         obstacleBouncesRemaining: bounce0,
+        heroCritChanceAdd: hp.critChanceAdd,
       });
     }
-    const cdScale = Number.isFinite(w.cooldownScale) && w.cooldownScale > 0 ? w.cooldownScale : 1;
-    const rlm = Number.isFinite(this.rifleReloadSpeedMult) && this.rifleReloadSpeedMult > 0 ? this.rifleReloadSpeedMult : 1;
+    playRifleShootSfx();
     this.rifleCooldown =
-      (RIFLE_COOLDOWN_SEC * cdScale * this.chestBuffRifleCooldownMult) / (safeAsp * rlm);
+      (RIFLE_COOLDOWN_SEC * cdScale * this.chestBuffRifleCooldownMult) / (aspEff * rlmEff);
   }
 
   private _integrateBullets(dt: number): void {
@@ -1840,6 +2264,16 @@ export class SurvivorGameModel {
       return;
     }
     let dmg = raw * this.chestBuffDamageTakenMult * this.profileDamageTakenMult;
+    if (!this._phantomMitigationUsed && this.profilePhantomMitigatePct > 0) {
+      const ph = Math.min(0.95, Math.max(0, this.profilePhantomMitigatePct));
+      dmg *= 1 - ph;
+      this._phantomMitigationUsed = true;
+    }
+    if (this.profileGuardianShield > 0 && dmg > 0) {
+      const abs = Math.min(dmg, this.profileGuardianShield);
+      this.profileGuardianShield -= abs;
+      dmg -= abs;
+    }
     const ar = this.armorAdd;
     if (ar > 0 && Number.isFinite(ar)) {
       dmg *= 100 / (100 + ar);
@@ -1850,6 +2284,9 @@ export class SurvivorGameModel {
     const hpBefore = this.playerHp;
     this.playerHp -= dmg;
     const actualLoss = hpBefore - this.playerHp;
+    if (actualLoss > 1e-6) {
+      playPlayerHurtSfx();
+    }
     const invBase = PLAYER_HURT_INVINCIBLE_BASE_SEC;
     const invMult =
       Number.isFinite(this.hurtInvincibleMult) && this.hurtInvincibleMult > 0 ? this.hurtInvincibleMult : 1;
@@ -1934,42 +2371,39 @@ export class SurvivorGameModel {
       const cy = Math.floor(by / cs);
 
       const hitEnemy = (e: Enemy): void => {
-        let dmg = b.damage;
-        const cc = Math.min(
-          1,
-          Math.max(
-            0,
-            this.critChance + this.chestBuffCritChanceBonus + this.rifleCritChanceAdd,
-          ),
-        );
-        const isCrit = cc > 0 && Math.random() < cc;
-        if (isCrit) {
-          dmg *= RIFLE_CRIT_BASE_MULT;
-          const ex = this.critOnHitDamageMult;
-          dmg *= Number.isFinite(ex) && ex > 0 ? ex : 1;
-        }
-        const lowFrac = this.playerMaxHp > 1e-6 ? this.playerHp / this.playerMaxHp : 1;
-        if (lowFrac <= 0.3) {
-          const lm = this.lowHpDamageMult;
-          if (Number.isFinite(lm) && lm > 0) {
-            dmg *= lm;
-          }
-        }
-        e.hp -= dmg;
-        let ls = this.chestBuffLifestealRatio + this.lifestealAdd;
-        if (isCrit) {
-          ls += this.critLifestealAdd;
-        }
-        if (ls > 0 && Number.isFinite(ls)) {
-          this.playerHp = Math.min(this.playerMaxHp, this.playerHp + dmg * ls);
-        }
+        this._applyPrimaryWeaponDamageToEnemy(e, b.damage, b.heroCritChanceAdd ?? 0);
         const ids = b.hitEnemyIds ?? (b.hitEnemyIds = []);
         ids.push(e.id);
         let hr = b.hitsRemaining ?? 1;
         hr -= 1;
         b.hitsRemaining = hr;
         if (hr <= 0) {
-          bullets.splice(i, 1);
+          const bounceRem = Math.max(0, Math.floor(b.obstacleBouncesRemaining ?? 0));
+          if (bounceRem > 0) {
+            const br = b.hitRadius ?? RIFLE_BULLET_RADIUS;
+            const res = resolveBulletEnemyCircleBounce(
+              b.x,
+              b.y,
+              br,
+              b.vx,
+              b.vy,
+              e.x,
+              e.y,
+              e.radius,
+            );
+            if (res) {
+              b.x = res.x;
+              b.y = res.y;
+              b.vx = res.vx;
+              b.vy = res.vy;
+              b.obstacleBouncesRemaining = bounceRem - 1;
+              b.hitsRemaining = 1;
+            } else {
+              bullets.splice(i, 1);
+            }
+          } else {
+            bullets.splice(i, 1);
+          }
         }
         if (e.hp <= 0) {
           this._onEnemyKilled(e);
@@ -2021,24 +2455,69 @@ export class SurvivorGameModel {
     }
   }
 
+  /** 击杀结算：移出数组、掉落与溅射；若目标已不在数组则直接返回，避免溅射递归缩短数组时仍用旧下标访问 */
   private _onEnemyKilled(e: Enemy): void {
     const idx = this.enemies.indexOf(e);
-    if (idx >= 0) {
-      this.enemies.splice(idx, 1);
+    if (idx < 0) {
+      return;
     }
+    const kx = e.x;
+    const ky = e.y;
+    this.enemies.splice(idx, 1);
     this.sessionKills += 1;
-    const kh = this.killHealAdd;
+    const khFlat = this.killHealAdd;
+    const khPct =
+      Number.isFinite(this.playerMaxHp) && this.playerMaxHp > 0
+        ? this.playerMaxHp * this.profileKillHealMaxHpPct
+        : 0;
+    const kh = khFlat + khPct;
     if (kh > 0 && Number.isFinite(kh)) {
       this.playerHp = Math.min(this.playerMaxHp, this.playerHp + kh);
     }
     this._dropXpGem(e.x, e.y, e.gemValue);
-    const luck = Number.isFinite(this.luckMult) && this.luckMult > 0 ? Math.min(1.75, this.luckMult) : 1;
-    const p = Math.min(
-      0.13,
-      GEAR_CHEST_DROP_BASE_CHANCE * (1 + Math.min(24, e.level) * 0.024) * luck,
-    );
-    if (Math.random() < p) {
+    if (e.isElite) {
       this._trySpawnGearChestNear(e.x, e.y, e.level);
+    } else {
+      const luck = Number.isFinite(this.luckMult) && this.luckMult > 0 ? Math.min(1.75, this.luckMult) : 1;
+      const p = Math.min(
+        GEAR_CHEST_DROP_MAX_CHANCE,
+        GEAR_CHEST_DROP_BASE_CHANCE * (1 + Math.min(24, e.level) * GEAR_CHEST_DROP_LEVEL_COEFF) * luck,
+      );
+      if (Math.random() < p) {
+        this._trySpawnGearChestNear(e.x, e.y, e.level);
+      }
+    }
+    const shr = Math.max(0, Math.floor(this.profileShrapnelStacks));
+    if (shr > 0) {
+      const rSplash = 95;
+      const r2 = rSplash * rSplash;
+      const rdm = Number.isFinite(this.rifleDamageMult) && this.rifleDamageMult > 0 ? this.rifleDamageMult : 1;
+      const splash =
+        RIFLE_BASE_DAMAGE *
+        0.18 *
+        shr *
+        this.damageMultiplier *
+        this.chestBuffDamageDealtMult *
+        rdm;
+      const splashKills: Enemy[] = [];
+      for (let j = this.enemies.length - 1; j >= 0; j--) {
+        const o = this.enemies[j];
+        if (!o) {
+          continue;
+        }
+        const dx = o.x - kx;
+        const dy = o.y - ky;
+        if (dx * dx + dy * dy > r2) {
+          continue;
+        }
+        o.hp -= splash;
+        if (o.hp <= 0) {
+          splashKills.push(o);
+        }
+      }
+      for (const dead of splashKills) {
+        this._onEnemyKilled(dead);
+      }
     }
   }
 
@@ -2177,15 +2656,22 @@ export class SurvivorGameModel {
     const reachSq = reach * reach;
     const em = Number.isFinite(this.expMult) && this.expMult > 0 ? this.expMult : 1;
     const xpGainMult = this.chestBuffXpGainMult * em;
+    let picked = 0;
     for (let i = this.gems.length - 1; i >= 0; i--) {
       const g = this.gems[i]!;
       const dx = g.x - this.playerX;
       const dy = g.y - this.playerY;
       if (dx * dx + dy * dy <= reachSq) {
-        this.xp += Math.round(g.value * xpGainMult);
+        if (this.level < PLAYER_MAX_LEVEL) {
+          this.xp += Math.round(g.value * xpGainMult);
+          this._checkLevelUpFromXp();
+        }
         this.gems.splice(i, 1);
-        this._checkLevelUpFromXp();
+        picked++;
       }
+    }
+    if (picked > 0) {
+      playGemPickupSfx();
     }
   }
 

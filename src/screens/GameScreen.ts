@@ -11,8 +11,12 @@ import {
 
 import {
   CAMERA_VIEW_WORLD_ON_SHORT_SIDE,
+  ELITE_ENEMY_FILL,
+  ELITE_ENEMY_STROKE,
   ENEMY_VISUAL_LOD_COUNT,
   PLAYER_BASE_MAX_HP,
+  PLAYER_DASH_BASE_COOLDOWN_SEC,
+  PLAYER_MAX_LEVEL,
   PLAYER_RADIUS,
   RIFLE_BULLET_RADIUS,
   WORLD_SIZE,
@@ -22,7 +26,13 @@ import { drawMapGrassDecor } from '../game/survivor/mapGrassVisual';
 import { drawObstacleOnMap } from '../game/survivor/obstacleVisual';
 import { PlayerWorldVisual } from '../game/survivor/playerWorldVisual';
 import { levelUpCardTierPresentation, type LevelUpCardDef } from '../game/config/levelUpCardsConfig';
-import { recordRunEndForAchievements } from '../game/meta/achievementStore';
+import {
+  computeRunCoinReward,
+  getPaletteForActiveGame,
+  getSelectedWeaponCosmetic,
+  loadAchievementSave,
+  recordRunEndForAchievements,
+} from '../game/meta/achievementStore';
 import {
   closePauseEquipmentOverlay,
   openPauseEquipmentOverlay,
@@ -37,7 +47,8 @@ import {
   toggleDevBonusMaxHp,
   toggleDevBonusRifleAttackSpeed,
 } from '../game/meta/devRuntime';
-import { PLAYER_WEAPON_DEFS } from '../game/config/playerWeaponsConfig';
+import { playGameOverSfx, playLevelUpConfirmSfx, playLevelUpPanelSfx } from '../game/audio/gameAudio';
+import { PLAYER_WEAPON_CATEGORY_LABELS, PLAYER_WEAPON_DEFS } from '../game/config/playerWeaponsConfig';
 import { SurvivorGameModel } from '../game/survivor/SurvivorGameModel';
 import type { MoveInput } from '../game/survivor/types';
 import { VirtualJoystick } from '../ui/VirtualJoystick';
@@ -45,6 +56,83 @@ import { exitGameToReactHome } from '../ui/shellBridge';
 import { app } from '../utils/application';
 import { formatDurationCn } from '../utils/formatDuration';
 import type { AppScreen } from '../utils/navigation';
+
+/** 全屏衬底与战场草地：与首页暖色渐变、橄榄绿场协调（仅用于 `_drawScreenBackdrop` / `_drawMapBackground`） */
+const BATTLE_HOME_THEME = {
+  /** 全屏衬底：对应 `linear-gradient(165deg, #fff0e0 … #f0a878)` */
+  backdropStops: [0xfff0e0, 0xffd8c0, 0xffc8a8, 0xf0a878] as const,
+  /** 战场草地：略偏暖的橄榄绿渐变 */
+  mapFieldStops: [0x6b7a52, 0x556844, 0x4a5838] as const,
+  /** 战场区域边界描边 */
+  mapBorder: 0x8a7860,
+} as const;
+
+/** 局内 Pixi HUD：条槽、右上信息板、左下按钮、冲刺与弹药药丸共用，避免珊瑚/米白/亮绿各自为政 */
+const HUD_THEME = {
+  barRadius: 8,
+  /** 条内边距：与圆角共同决定填充条可用宽度 */
+  barInset: 3,
+  /** 条槽底色 */
+  barTrack: 0xfff7f0,
+  barTrackAlpha: 0.94,
+  barTrackInner: 0x5a4030,
+  barTrackInnerAlpha: 0.12,
+  /** 外描边：单层即可，替代原先白边+金边双线 */
+  barStroke: 0xfff0e0,
+  barStrokeAlpha: 0.88,
+  barInnerStroke: 0xc49a30,
+  barInnerStrokeAlpha: 0.16,
+  hpGradTop: 0xff8860,
+  hpGradBot: 0xe05848,
+  xpGradTop: 0x6ab0d8,
+  xpGradBot: 0x4a78a0,
+  magGradTop: 0xe8d8a8,
+  magGradBot: 0xa87840,
+  reloadGradTop: 0xffc070,
+  reloadGradBot: 0xd07028,
+  /** 右上文案区：距屏边与顶偏移（无背景框，亮色靠描边压草地） */
+  rightInnerPad: 11,
+  rightPanelTopOffset: 4,
+  /** 右上四行主色 */
+  rightHudTimer: 0xfffef8,
+  rightHudWeapon: 0xffe8a8,
+  rightHudLevel: 0xff8a88,
+  rightHudFps: 0x98ffc8,
+  /** 共用描边，避免亮色发糊 */
+  rightHudStroke: 0x2a1810,
+  rightHudStrokeW: 1.6,
+  /** 左上弹药文案药丸底 */
+  ammoPillBg: 0x1a160c,
+  ammoPillBgAlpha: 0.44,
+  ammoPillStroke: 0xffecd8,
+  ammoPillStrokeAlpha: 0.52,
+  ammoPillRr: 10,
+  /** 暂停 / 倍速：与 `.home-menu-btn` 同系渐变 */
+  btnGradTop: 0xfffefb,
+  btnGradBot: 0xffe8d8,
+  btnStroke: 0xffffff,
+  btnStrokeAlpha: 0.88,
+  btnText: 0x5a3830,
+  /** 冲刺：饱和度低于旧版橙钮，与外圈 CD 同属暖陶色系 */
+  dashGradTop: 0xeeaa78,
+  dashGradMid: 0xe09060,
+  dashGradBot: 0xc47050,
+  dashStroke: 0xffecd8,
+  dashStrokeAlpha: 0.9,
+  dashRingTrack: 0xfff7f0,
+  dashRingTrackAlpha: 0.3,
+  dashRingCd: 0xc87858,
+  dashRingCdAlpha: 0.92,
+  dashText: 0xfffaf5,
+} as const;
+
+/** 战术升级标题字号：随屏高缩放，接近首页标题 `clamp` 观感 */
+function levelUpTitleFontPx(screenH: number): number {
+  if (screenH <= 0) {
+    return 30;
+  }
+  return Math.max(24, Math.min(34, Math.round(screenH * 0.042)));
+}
 
 /** 玩法屏：阶段 1 核心循环（移动、步枪、步兵、经验、升级三选一、HUD） */
 export class GameScreen extends Container implements AppScreen {
@@ -72,11 +160,20 @@ export class GameScreen extends Container implements AppScreen {
   private readonly _levelText: Text;
   /** 右上角当前武器名（Q/E 切换） */
   private readonly _weaponHudText: Text;
+
+  /** 左上血条下方：弹药余量 / 换弹 / 近战说明 */
+  private readonly _ammoHudText: Text;
+  /** 弹药文案背后的圆角药丸底，提高与草地对比度 */
+  private readonly _ammoHudPill = new Graphics();
   private readonly _fpsText: Text;
   /** 开启宝箱后的短时提示（屏幕中下） */
   private readonly _chestToastText: Text;
   private readonly _levelUpRoot = new Container();
   private readonly _levelUpDim = new Graphics();
+  /** 与首页 `page-home-subtitle` 类似的半透明药丸底 */
+  private readonly _levelUpSubtitleBg = new Graphics();
+  /** 与首页 `page-home-decor-star` 呼应的装饰星 */
+  private readonly _levelUpDecor = new Container();
   private readonly _levelUpTitle!: Text;
   private _levelUpSubtitle!: Text;
   private readonly _levelUpChoicesHolder = new Container();
@@ -87,6 +184,8 @@ export class GameScreen extends Container implements AppScreen {
   private readonly _gameOverTitle: Text;
   private readonly _gameOverStats: Text;
   private readonly _gameOverHint: Text;
+  /** 避免结算音效在同一局重复触发 */
+  private _gameOverSfxPlayed = false;
 
   private readonly _joystick: VirtualJoystick;
 
@@ -110,39 +209,36 @@ export class GameScreen extends Container implements AppScreen {
   private _hpTapCount = 0;
   private _hpTapLastMs = 0;
 
-  private readonly _keys = new Set<string>();
-  /** Q/E 边沿检测，避免长按连续切枪 */
-  private _keyQDown = false;
-  private _keyEDown = false;
-  /** P：打开/关闭局内装备暂停层 */
-  private _keyPDown = false;
-  /** 左下角旁：点按打开暂停整备（与 P 键一致） */
-  private readonly _pauseFab = new Container();
-
-  /** 右下角：触摸冲刺（与空格一致） */
+  /** 右下角：触摸冲刺 */
   private readonly _dashFab = new Container();
 
-  /** 本帧是否已请求冲刺（空格沿 / 冲刺键点按） */
+  /** 触摸：上一把 / 下一把主武器（替代原键盘 Q/E） */
+  private readonly _weaponPrevFab = new Container();
+  private readonly _weaponNextFab = new Container();
+
+  /** 触摸：手动换弹（替代原键盘 R；近战隐藏） */
+  private readonly _reloadFab = new Container();
+
+  /** 本帧是否已请求冲刺（冲刺触摸键点按） */
   private _dashQueued = false;
-  private _onKeyDown = (e: KeyboardEvent): void => {
-    this._keys.add(e.code);
-    if (e.code === 'Space' && !e.repeat) {
-      this._dashQueued = true;
-      e.preventDefault();
+
+  /** Cordova Android 物理返回键：打开/关闭局内整备（替代已移除的「暂停」按钮） */
+  private readonly _onCordovaBackButton = (ev: Event): void => {
+    const m = this._model;
+    if (m.manualPaused) {
+      ev.preventDefault();
+      closePauseEquipmentOverlay();
+      return;
     }
-    if (e.code === 'KeyP') {
-      if (!this._keyPDown) {
-        this._togglePauseEquipment();
-      }
-      this._keyPDown = true;
-      e.preventDefault();
+    if (m.awaitingLevelUp) {
+      ev.preventDefault();
+      return;
     }
-  };
-  private _onKeyUp = (e: KeyboardEvent): void => {
-    this._keys.delete(e.code);
-    if (e.code === 'KeyP') {
-      this._keyPDown = false;
+    if (m.gameOver) {
+      return;
     }
+    ev.preventDefault();
+    openPauseEquipmentOverlay();
   };
 
   private _w = 0;
@@ -165,6 +261,25 @@ export class GameScreen extends Container implements AppScreen {
   private _lastHudLevel = 0;
 
   private _lastHudWeaponIndex = -1;
+
+  /** 武器名+分类（右上单行）；弹药与换弹移至左下弹药条 */
+  private _lastWeaponHudLine = '';
+
+  /** 左下弹药条旁文案，变则触发 `_layoutHud` */
+  private _lastAmmoHudLine = '';
+
+  /** 右下角冲刺按钮边长（圆形，含外圈 CD 环） */
+  private static readonly _DASH_FAB_PX = 60;
+
+  /** 右下切枪触摸键边长（方形圆角） */
+  private static readonly _WEAPON_FAB_PX = 44;
+
+  /** 右下换弹触摸键尺寸（与左下倍率条钮风格一致） */
+  private static readonly _RELOAD_FAB_W = 52;
+  private static readonly _RELOAD_FAB_H = 34;
+
+  /** 冲刺 CD 圆环：每帧重绘 */
+  private readonly _dashCdRing = new Graphics();
 
   /** 对 `Ticker.FPS` 做指数平滑，避免数字剧烈跳动 */
   private _fpsSmoothed = 60;
@@ -195,44 +310,63 @@ export class GameScreen extends Container implements AppScreen {
     });
 
     const hudFont = '"Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif';
+    const rhs = HUD_THEME.rightHudStroke;
+    const rsw = HUD_THEME.rightHudStrokeW;
     this._timeText = new Text({
       text: '00:00',
       style: new TextStyle({
         fontFamily: hudFont,
-        fontSize: 22,
+        fontSize: 21,
         fontWeight: 'bold',
-        fill: 0xf5e6d3,
-        dropShadow: { blur: 3, distance: 1, color: 0x000000, alpha: 0.85 },
+        fill: HUD_THEME.rightHudTimer,
+        stroke: { color: rhs, width: rsw },
+        dropShadow: { blur: 0, distance: 1, color: 0x000000, alpha: 0.35 },
       }),
     });
     this._levelText = new Text({
       text: 'Lv 1',
       style: new TextStyle({
         fontFamily: hudFont,
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: 'bold',
-        fill: 0xe8d4a8,
-        dropShadow: { blur: 2, distance: 1, color: 0x000000, alpha: 0.8 },
+        fill: HUD_THEME.rightHudLevel,
+        stroke: { color: rhs, width: rsw },
+        dropShadow: { blur: 0, distance: 1, color: 0x000000, alpha: 0.3 },
       }),
     });
     this._weaponHudText = new Text({
       text: '',
       style: new TextStyle({
         fontFamily: hudFont,
-        fontSize: 14,
-        fontWeight: '600',
-        fill: 0xd4c4a8,
-        dropShadow: { blur: 2, distance: 1, color: 0x000000, alpha: 0.78 },
+        fontSize: 13,
+        fontWeight: '700',
+        fill: HUD_THEME.rightHudWeapon,
+        align: 'right',
+        wordWrap: true,
+        wordWrapWidth: 142,
+        stroke: { color: rhs, width: rsw },
+        lineHeight: 17,
+      }),
+    });
+    this._ammoHudText = new Text({
+      text: '',
+      style: new TextStyle({
+        fontFamily: hudFont,
+        fontSize: 12,
+        fontWeight: '700',
+        fill: 0xfff0e0,
+        stroke: { color: 0x2a2018, width: 1.2 },
       }),
     });
     this._fpsText = new Text({
       text: '60 FPS',
       style: new TextStyle({
         fontFamily: hudFont,
-        fontSize: 14,
-        fontWeight: '600',
-        fill: 0x9fdf90,
-        dropShadow: { blur: 2, distance: 1, color: 0x000000, alpha: 0.75 },
+        fontSize: 13,
+        fontWeight: '700',
+        fill: HUD_THEME.rightHudFps,
+        stroke: { color: rhs, width: rsw },
+        dropShadow: { blur: 0, distance: 1, color: 0x000000, alpha: 0.28 },
       }),
     });
     this._chestToastText = new Text({
@@ -241,11 +375,12 @@ export class GameScreen extends Container implements AppScreen {
         fontFamily: hudFont,
         fontSize: 15,
         fontWeight: 'bold',
-        fill: 0xffe8a8,
+        fill: 0xfffaf0,
         align: 'center',
         wordWrap: true,
         wordWrapWidth: 320,
-        dropShadow: { blur: 4, distance: 1, color: 0x000000, alpha: 0.9 },
+        stroke: { color: 0xc87858, width: 2 },
+        dropShadow: { blur: 4, distance: 2, color: 0x502820, alpha: 0.4 },
       }),
     });
     this._chestToastText.anchor.set(0.5, 0.5);
@@ -266,8 +401,11 @@ export class GameScreen extends Container implements AppScreen {
       e.stopPropagation();
       this._onHealthBarTripleTap();
     });
+    this._ammoHudPill.eventMode = 'none';
     this._hudRoot.addChild(
       this._hudGfx,
+      this._ammoHudPill,
+      this._ammoHudText,
       this._timeText,
       this._weaponHudText,
       this._levelText,
@@ -277,7 +415,6 @@ export class GameScreen extends Container implements AppScreen {
       this._dashFab,
     );
 
-    this._buildPauseFab();
     this._buildDashFab();
     this._buildLevelUpUi();
     this._buildGameOverUi();
@@ -307,6 +444,10 @@ export class GameScreen extends Container implements AppScreen {
     this._model.reset();
     this._model.syncWeaponLoadoutFromProfile();
     this._model.syncGearLoadoutFromProfile();
+    const prof = loadAchievementSave();
+    const pal = getPaletteForActiveGame(prof);
+    const wcos = getSelectedWeaponCosmetic(prof);
+    this._playerWorldVisual.setPlayerAppearance(pal, wcos.gunWood, wcos.gunMetal);
     this._playerWorldVisual.resetPhase();
     this._levelUpRoot.visible = false;
     this._gameOverRoot.visible = false;
@@ -319,6 +460,7 @@ export class GameScreen extends Container implements AppScreen {
     this._lastHudTimeInt = -1;
     this._lastHudLevel = 0;
     this._lastHudWeaponIndex = -1;
+    this._lastWeaponHudLine = '';
     this._fpsSmoothed = 60;
     this._fpsText.text = '60 FPS';
     this._drawMapBackground();
@@ -335,19 +477,16 @@ export class GameScreen extends Container implements AppScreen {
     });
   }
 
-  /** 订阅键盘；淡入由导航 `show` 调用，此处无需异步 */
+  /** 淡入由导航 `show` 调用；注册 Cordova 返回键以开关整备层 */
   public async show(): Promise<void> {
-    window.addEventListener('keydown', this._onKeyDown);
-    window.addEventListener('keyup', this._onKeyUp);
+    document.addEventListener('backbutton', this._onCordovaBackButton, false);
   }
 
-  /** 取消键盘订阅 */
+  /** 离开战斗屏时关闭整备层并释放摇杆 */
   public async hide(): Promise<void> {
+    document.removeEventListener('backbutton', this._onCordovaBackButton, false);
     closePauseEquipmentOverlay();
     registerPauseEquipment(null);
-    window.removeEventListener('keydown', this._onKeyDown);
-    window.removeEventListener('keyup', this._onKeyUp);
-    this._keys.clear();
     this._joystick.dispose();
   }
 
@@ -356,7 +495,6 @@ export class GameScreen extends Container implements AppScreen {
     const fpsBlend = 0.15;
     this._fpsSmoothed += (ticker.FPS - this._fpsSmoothed) * fpsBlend;
     const dt = (ticker.deltaMS / 1000) * this._timeScale;
-    this._pollWeaponSwitchKeys();
     this._model.step(dt, this._readMoveInput());
     if (this._model.chestToastRemain > 0) {
       this._model.chestToastRemain = Math.max(0, this._model.chestToastRemain - dt);
@@ -368,15 +506,21 @@ export class GameScreen extends Container implements AppScreen {
       !this._model.paused &&
       !this._model.awaitingLevelUp &&
       !this._model.manualPaused;
-    this._pauseFab.visible = steerOk;
     this._dashFab.visible = steerOk;
+    const melee = PLAYER_WEAPON_DEFS[this._model.equippedWeaponKind].category === 'melee';
+    const multiW = this._model.ownedWeaponCount > 1;
+    this._weaponPrevFab.visible = steerOk && multiW;
+    this._weaponNextFab.visible = steerOk && multiW;
+    this._reloadFab.visible = steerOk && !melee;
     this._playerWorldVisual.sync(this._model, dt, frozen);
     this._syncEnemyWorldVisuals(frozen);
     this._drawMapObstacles();
     this._drawWorldEntities();
     this._drawHud();
+    this._syncDashFabVisual();
     this._syncLevelUpVisibility();
     this._syncGameOverVisibility();
+    this._layoutMobileCombatFabs();
   }
 
   /** 布局 HUD 与遮罩层尺寸 */
@@ -391,7 +535,6 @@ export class GameScreen extends Container implements AppScreen {
     this._joystick.layout(w, h);
     this._layoutHud();
     this._hpBarDevHitDirty = true;
-    this._layoutCornerDevHud();
     if (this._devPanelOpen) {
       this._layoutDevPanel();
     }
@@ -399,73 +542,151 @@ export class GameScreen extends Container implements AppScreen {
     this._layoutGameOver();
   }
 
-  /** P 键 / 角标：打开或关闭局内装备整备层 */
-  private _togglePauseEquipment(): void {
-    const m = this._model;
-    if (m.gameOver || m.paused || m.awaitingLevelUp) {
-      return;
-    }
-    if (m.manualPaused) {
-      closePauseEquipmentOverlay();
-    } else {
-      openPauseEquipmentOverlay();
-    }
-  }
-
-  /** 左下角暂停角标（触摸） */
-  private _buildPauseFab(): void {
-    this._pauseFab.eventMode = 'static';
-    this._pauseFab.cursor = 'pointer';
-    const pBg = new Graphics();
-    pBg.roundRect(0, 0, 52, 34, 8).fill({ color: 0x1a1814, alpha: 0.88 });
-    pBg.roundRect(0, 0, 52, 34, 8).stroke({ width: 1.2, color: 0x6a5840, alpha: 0.9 });
-    const pTxt = new Text({
-      text: '暂停',
-      style: new TextStyle({
-        fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
-        fontSize: 14,
-        fontWeight: '600',
-        fill: 0xe8dcc8,
-      }),
-    });
-    pTxt.anchor.set(0.5);
-    pTxt.position.set(26, 17);
-    this._pauseFab.hitArea = new Rectangle(0, 0, 52, 34);
-    this._pauseFab.addChild(pBg, pTxt);
-    this._pauseFab.on('pointertap', (e: FederatedPointerEvent) => {
-      e.stopPropagation();
-      this._togglePauseEquipment();
-    });
-    this._hudRoot.addChild(this._pauseFab);
-  }
-
-  /** 右下角冲刺键：与键盘空格同逻辑，便于触屏 */
+  /** 右下角冲刺：圆形按钮 + 外圈 CD 环（`_syncDashFabVisual` 每帧刷新环） */
   private _buildDashFab(): void {
+    const s = GameScreen._DASH_FAB_PX;
+    const cx = s * 0.5;
+    const cy = s * 0.5;
     this._dashFab.eventMode = 'static';
     this._dashFab.cursor = 'pointer';
     const dBg = new Graphics();
-    dBg.roundRect(0, 0, 56, 56, 12).fill({ color: 0x1a2820, alpha: 0.9 });
-    dBg.roundRect(0, 0, 56, 56, 12).stroke({ width: 1.4, color: 0x4a8060, alpha: 0.95 });
+    const dg = new FillGradient({
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 1 },
+      textureSpace: 'local',
+    });
+    dg.addColorStop(0, HUD_THEME.dashGradTop);
+    dg.addColorStop(0.48, HUD_THEME.dashGradMid);
+    dg.addColorStop(1, HUD_THEME.dashGradBot);
+    dBg.circle(cx, cy, s * 0.42).fill({ fill: dg });
+    dBg
+      .circle(cx, cy, s * 0.42)
+      .stroke({ width: 2, color: HUD_THEME.dashStroke, alpha: HUD_THEME.dashStrokeAlpha });
+    const dTrack = new Graphics();
+    dTrack
+      .circle(cx, cy, s * 0.48)
+      .stroke({ width: 3, color: HUD_THEME.dashRingTrack, alpha: HUD_THEME.dashRingTrackAlpha });
+    this._dashCdRing.eventMode = 'none';
     const dTxt = new Text({
       text: '冲刺',
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
-        fontSize: 15,
-        fontWeight: '600',
-        fill: 0xc8e8d0,
+        fontSize: 14,
+        fontWeight: '800',
+        fill: HUD_THEME.dashText,
+        dropShadow: { blur: 0, distance: 1, color: 0x302010, alpha: 0.35 },
       }),
     });
     dTxt.anchor.set(0.5);
-    dTxt.position.set(28, 28);
-    this._dashFab.hitArea = new Rectangle(0, 0, 56, 56);
-    this._dashFab.addChild(dBg, dTxt);
+    dTxt.position.set(cx, cy);
+    this._dashFab.hitArea = new Rectangle(0, 0, s, s);
+    this._dashFab.addChild(dBg, dTrack, this._dashCdRing, dTxt);
     this._dashFab.on('pointertap', (e: FederatedPointerEvent) => {
       e.stopPropagation();
       this._dashQueued = true;
     });
   }
 
-  /** 摇杆优先，其次 WASD / 方向键；暂停或弹窗时摇杆禁用；空格/冲刺键沿触发冲刺 */
+  /** 右下：‹ › 切主武器（与左下倍率钮同系渐变） */
+  private _buildWeaponSwitchFabs(): void {
+    const s = GameScreen._WEAPON_FAB_PX;
+    const mk = (label: string, delta: number): void => {
+      const root = delta < 0 ? this._weaponPrevFab : this._weaponNextFab;
+      root.removeChildren();
+      root.eventMode = 'static';
+      root.cursor = 'pointer';
+      const bg = new Graphics();
+      const pg = new FillGradient({
+        start: { x: 0, y: 0 },
+        end: { x: 0, y: 1 },
+        textureSpace: 'local',
+      });
+      pg.addColorStop(0, HUD_THEME.btnGradTop);
+      pg.addColorStop(1, HUD_THEME.btnGradBot);
+      bg.roundRect(0, 0, s, s, 10).fill({ fill: pg });
+      bg.roundRect(0, 0, s, s, 10).stroke({ width: 2, color: HUD_THEME.btnStroke, alpha: HUD_THEME.btnStrokeAlpha });
+      const t = new Text({
+        text: label,
+        style: new TextStyle({
+          fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
+          fontSize: 22,
+          fontWeight: '800',
+          fill: HUD_THEME.btnText,
+        }),
+      });
+      t.anchor.set(0.5);
+      t.position.set(s * 0.5, s * 0.5);
+      root.hitArea = new Rectangle(0, 0, s, s);
+      root.addChild(bg, t);
+      root.on('pointertap', (e: FederatedPointerEvent) => {
+        e.stopPropagation();
+        this._model.cycleWeapon(delta);
+      });
+    };
+    mk('‹', -1);
+    mk('›', 1);
+    this._hudRoot.addChild(this._weaponPrevFab, this._weaponNextFab);
+  }
+
+  /** 右下：换弹条钮（近战不显示，由 `update` 控制 `visible`） */
+  private _buildReloadFab(): void {
+    const w = GameScreen._RELOAD_FAB_W;
+    const h = GameScreen._RELOAD_FAB_H;
+    this._reloadFab.eventMode = 'static';
+    this._reloadFab.cursor = 'pointer';
+    const bg = new Graphics();
+    const pg = new FillGradient({
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 1 },
+      textureSpace: 'local',
+    });
+    pg.addColorStop(0, HUD_THEME.btnGradTop);
+    pg.addColorStop(1, HUD_THEME.btnGradBot);
+    bg.roundRect(0, 0, w, h, 10).fill({ fill: pg });
+    bg.roundRect(0, 0, w, h, 10).stroke({ width: 2, color: HUD_THEME.btnStroke, alpha: HUD_THEME.btnStrokeAlpha });
+    const txt = new Text({
+      text: '换弹',
+      style: new TextStyle({
+        fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
+        fontSize: 14,
+        fontWeight: '800',
+        fill: HUD_THEME.btnText,
+      }),
+    });
+    txt.anchor.set(0.5);
+    txt.position.set(w * 0.5, h * 0.5);
+    this._reloadFab.hitArea = new Rectangle(0, 0, w, h);
+    this._reloadFab.addChild(bg, txt);
+    this._reloadFab.on('pointertap', (e: FederatedPointerEvent) => {
+      e.stopPropagation();
+      this._model.requestWeaponReload();
+    });
+    this._hudRoot.addChild(this._reloadFab);
+  }
+
+  /** 冲刺冷却剩余弧长 = `dashCooldownLeft / 基准冷却`；就绪时不画弧 */
+  private _syncDashFabVisual(): void {
+    const s = GameScreen._DASH_FAB_PX;
+    const cx = s * 0.5;
+    const cy = s * 0.5;
+    const ringR = s * 0.48;
+    const m = this._model;
+    const dcm = Number.isFinite(m.dashCooldownMult) && m.dashCooldownMult > 0 ? m.dashCooldownMult : 1;
+    const maxCd = PLAYER_DASH_BASE_COOLDOWN_SEC * dcm;
+    const g = this._dashCdRing;
+    g.clear();
+    if (m.dashCooldownLeft <= 1e-4 || maxCd <= 1e-6) {
+      return;
+    }
+    const ratio = Math.min(1, Math.max(0, m.dashCooldownLeft / maxCd));
+    const sweep = ratio * Math.PI * 2;
+    const start = -Math.PI / 2;
+    const end = start + sweep;
+    g.arc(cx, cy, ringR, start, end, false);
+    g.stroke({ width: 4, color: HUD_THEME.dashRingCd, alpha: HUD_THEME.dashRingCdAlpha });
+  }
+
+  /** 仅虚拟摇杆；暂停或弹窗时摇杆禁用；冲刺触摸键沿触发冲刺 */
   private _readMoveInput(): MoveInput {
     const m = this._model;
     const canSteer = !m.gameOver && !m.paused && !m.awaitingLevelUp && !m.manualPaused;
@@ -476,10 +697,10 @@ export class GameScreen extends Container implements AppScreen {
     const useStick = mag > 0.02;
 
     const input = this._moveInputCache;
-    input.up = this._keys.has('KeyW') || this._keys.has('ArrowUp');
-    input.down = this._keys.has('KeyS') || this._keys.has('ArrowDown');
-    input.left = this._keys.has('KeyA') || this._keys.has('ArrowLeft');
-    input.right = this._keys.has('KeyD') || this._keys.has('ArrowRight');
+    input.up = false;
+    input.down = false;
+    input.left = false;
+    input.right = false;
     if (useStick) {
       input.analogX = analogX;
       input.analogY = analogY;
@@ -497,35 +718,64 @@ export class GameScreen extends Container implements AppScreen {
     return input;
   }
 
-  /** Q 上一把、E 下一把；边沿触发，暂停/弹窗/阵亡时由模型忽略 */
-  private _pollWeaponSwitchKeys(): void {
-    const q = this._keys.has('KeyQ');
-    const e = this._keys.has('KeyE');
-    if (q && !this._keyQDown) {
-      this._model.cycleWeapon(-1);
+  /** 右下冲刺/切枪/换弹与左下倍率触摸键位置（每帧更新，因近战与多武器显隐会变） */
+  private _layoutMobileCombatFabs(): void {
+    const pad = 14;
+    const bottomPad = pad;
+    const cornerH = GameScreen._CORNER_DEV_HUD_OUTER_H;
+    this._cornerDevHud.position.set(bottomPad, this._h - bottomPad - cornerH);
+
+    const dashS = GameScreen._DASH_FAB_PX;
+    const dashX = this._w - pad - dashS;
+    const dashY = this._h - bottomPad - dashS - 8;
+    this._dashFab.position.set(dashX, dashY);
+
+    const wBtn = GameScreen._WEAPON_FAB_PX;
+    const wGap = 6;
+    const weaponRowW = wBtn * 2 + wGap;
+    const weaponRowX = this._w - pad - weaponRowW;
+    const melee = PLAYER_WEAPON_DEFS[this._model.equippedWeaponKind].category === 'melee';
+    const fabGap = 8;
+    let stackTop = dashY;
+    if (!melee) {
+      const rw = GameScreen._RELOAD_FAB_W;
+      const rh = GameScreen._RELOAD_FAB_H;
+      const reloadY = dashY - fabGap - rh;
+      this._reloadFab.position.set(dashX + (dashS - rw) * 0.5, reloadY);
+      stackTop = reloadY;
     }
-    if (e && !this._keyEDown) {
-      this._model.cycleWeapon(1);
-    }
-    this._keyQDown = q;
-    this._keyEDown = e;
+    const weaponY = stackTop - fabGap - wBtn;
+    this._weaponPrevFab.position.set(weaponRowX, weaponY);
+    this._weaponNextFab.position.set(weaponRowX + wBtn + wGap, weaponY);
   }
 
-  /** 与地图主色接近的全屏底，相机边缘外不再露白 */
+  /** 全屏衬底：与首页 `page-home` 暖色渐变一致，相机边缘外不露冷灰 */
   private _drawScreenBackdrop(): void {
     const g = this._screenBackdrop;
     g.clear();
     const soil = new FillGradient({
       start: { x: 0, y: 0 },
-      end: { x: 0, y: 1 },
+      end: { x: 1, y: 1 },
       textureSpace: 'local',
     });
-    soil.addColorStop(0, 0x2f3d28);
-    soil.addColorStop(1, 0x232b1e);
+    const st = BATTLE_HOME_THEME.backdropStops;
+    soil.addColorStop(0, st[0]!);
+    soil.addColorStop(0.38, st[1]!);
+    soil.addColorStop(0.72, st[2]!);
+    soil.addColorStop(1, st[3]!);
     g.rect(0, 0, this._w, this._h).fill({ fill: soil });
+    const glow = new FillGradient({
+      start: { x: 0.5, y: 0 },
+      end: { x: 0.5, y: 0.85 },
+      textureSpace: 'local',
+    });
+    glow.addColorStop(0, 0xffecd8);
+    glow.addColorStop(0.55, 0xffc8a8);
+    glow.addColorStop(1, 0xf0a878);
+    g.rect(0, 0, this._w, this._h * 0.42).fill({ fill: glow, alpha: 0.22 });
   }
 
-  /** 绘制 800×800 村庄底色与边界（世界坐标） */
+  /** 绘制 800×800 战场草地：偏暖橄榄绿，与首页暖底协调 */
   private _drawMapBackground(): void {
     const g = this._mapBg;
     g.clear();
@@ -535,11 +785,12 @@ export class GameScreen extends Container implements AppScreen {
       end: { x: 1, y: 1 },
       textureSpace: 'local',
     });
-    soil.addColorStop(0, 0x4a5f3a);
-    soil.addColorStop(0.5, 0x3d4a32);
-    soil.addColorStop(1, 0x2e3b28);
+    const mf = BATTLE_HOME_THEME.mapFieldStops;
+    soil.addColorStop(0, mf[0]!);
+    soil.addColorStop(0.5, mf[1]!);
+    soil.addColorStop(1, mf[2]!);
     g.rect(0, 0, m, m).fill({ fill: soil });
-    g.rect(0, 0, m, m).stroke({ width: 4, color: 0x1e2418, alpha: 0.9 });
+    g.rect(0, 0, m, m).stroke({ width: 3, color: BATTLE_HOME_THEME.mapBorder, alpha: 0.88 });
   }
 
   /** 在世界地图上撒小草簇，种子固定使同设备上分布稳定 */
@@ -653,27 +904,136 @@ export class GameScreen extends Container implements AppScreen {
     }
 
     const pr = m.pickupRadius;
-    g.circle(m.playerX, m.playerY, pr).stroke({ width: 1, color: 0xffffff, alpha: 0.12 });
+    g.circle(m.playerX, m.playerY, pr).stroke({ width: 1.2, color: 0xfffaf0, alpha: 0.22 });
   }
 
-  /** 左上角血条/经验条，右上时间与等级 */
+  /** 左上血/经验/弹药条与 `_layoutHud` 共用几何，避免面板与 HUD 绘图错位；返回 pad、各条 Y 与 barW */
+  private _hudLeftLayoutMetrics(): {
+    pad: number;
+    barW: number;
+    barH: number;
+    hpY: number;
+    xpY: number;
+    magY: number;
+    magBarH: number;
+    rr: number;
+  } {
+    const pad = 14;
+    const barW = Math.min(220, this._w * 0.48);
+    const barH = 16;
+    const hpY = pad + 6;
+    const xpY = hpY + barH + 10;
+    const magY = xpY + barH + 8;
+    const magBarH = 12;
+    const rr = HUD_THEME.barRadius;
+    return { pad, barW, barH, hpY, xpY, magY, magBarH, rr };
+  }
+
+  /** 左上角血条/经验条/弹药，右上时间/武器/等级/FPS 文案（无衬底框） */
   private _drawHud(): void {
     const g = this._hudGfx;
     g.clear();
     const m = this._model;
-    const pad = 14;
-    const barW = Math.min(220, this._w * 0.48);
-    const barH = 14;
-    const hpY = pad + 6;
-    const xpY = hpY + barH + 10;
+    const met = this._hudLeftLayoutMetrics();
+    const { pad, barW, barH, hpY, xpY, magY, magBarH, rr } = met;
+    const inset = HUD_THEME.barInset;
 
-    g.roundRect(pad, hpY, barW, barH, 5).fill({ color: 0x1a1a1a, alpha: 0.65 });
+    const drawBarShell = (y: number): void => {
+      g.roundRect(pad, y, barW, barH, rr).fill({ color: HUD_THEME.barTrack, alpha: HUD_THEME.barTrackAlpha });
+      g.roundRect(pad, y, barW, barH, rr).stroke({
+        width: 2,
+        color: HUD_THEME.barStroke,
+        alpha: HUD_THEME.barStrokeAlpha,
+      });
+      g.roundRect(pad, y, barW, barH, rr).stroke({
+        width: 1.5,
+        color: HUD_THEME.barInnerStroke,
+        alpha: HUD_THEME.barInnerStrokeAlpha,
+      });
+      g.roundRect(pad + inset, y + inset, barW - inset * 2, barH - inset * 2, rr - 2).fill({
+        color: HUD_THEME.barTrackInner,
+        alpha: HUD_THEME.barTrackInnerAlpha,
+      });
+    };
+    drawBarShell(hpY);
     const hpRatio = m.playerMaxHp > 0 ? m.playerHp / m.playerMaxHp : 0;
-    g.roundRect(pad + 2, hpY + 2, (barW - 4) * hpRatio, barH - 4, 4).fill({ color: 0xc43c3c });
+    const hpFillW = Math.max(0, (barW - inset * 2) * hpRatio);
+    if (hpFillW > 0.5) {
+      const hpg = new FillGradient({
+        start: { x: 0, y: 0 },
+        end: { x: 0, y: 1 },
+        textureSpace: 'local',
+      });
+      hpg.addColorStop(0, HUD_THEME.hpGradTop);
+      hpg.addColorStop(1, HUD_THEME.hpGradBot);
+      g.roundRect(pad + inset, hpY + inset, hpFillW, barH - inset * 2, rr - 3).fill({ fill: hpg });
+    }
 
-    g.roundRect(pad, xpY, barW, barH, 5).fill({ color: 0x1a1a1a, alpha: 0.65 });
-    const xpRatio = m.xpToNext > 0 ? Math.min(1, m.xp / m.xpToNext) : 0;
-    g.roundRect(pad + 2, xpY + 2, (barW - 4) * xpRatio, barH - 4, 4).fill({ color: 0x3a7cc4 });
+    drawBarShell(xpY);
+    const xpRatio =
+      m.xpToNext > 0 ? Math.min(1, m.xp / m.xpToNext) : m.level >= PLAYER_MAX_LEVEL ? 1 : 0;
+    const xpFillW = Math.max(0, (barW - inset * 2) * xpRatio);
+    if (xpFillW > 0.5) {
+      const xpg = new FillGradient({
+        start: { x: 0, y: 0 },
+        end: { x: 0, y: 1 },
+        textureSpace: 'local',
+      });
+      xpg.addColorStop(0, HUD_THEME.xpGradTop);
+      xpg.addColorStop(1, HUD_THEME.xpGradBot);
+      g.roundRect(pad + inset, xpY + inset, xpFillW, barH - inset * 2, rr - 3).fill({ fill: xpg });
+    }
+
+    const magRr = Math.max(4, rr - 2);
+    const wd = PLAYER_WEAPON_DEFS[m.equippedWeaponKind];
+    const drawMagShell = (y: number, h: number): void => {
+      g.roundRect(pad, y, barW, h, magRr).fill({ color: HUD_THEME.barTrack, alpha: HUD_THEME.barTrackAlpha });
+      g.roundRect(pad, y, barW, h, magRr).stroke({
+        width: 1.5,
+        color: HUD_THEME.barStroke,
+        alpha: HUD_THEME.barStrokeAlpha * 0.92,
+      });
+      g.roundRect(pad + inset, y + inset, barW - inset * 2, h - inset * 2, magRr - 2).fill({
+        color: HUD_THEME.barTrackInner,
+        alpha: HUD_THEME.barTrackInnerAlpha * 0.67,
+      });
+    };
+    if (wd.category !== 'melee') {
+      drawMagShell(magY, magBarH);
+      const innerW = barW - inset * 2;
+      if (m.rifleReloadRemaining > 0 && m.rifleReloadTotalSec > 1e-6) {
+        const rp = Math.min(1, Math.max(0, 1 - m.rifleReloadRemaining / m.rifleReloadTotalSec));
+        const reloadW = Math.max(0, innerW * rp);
+        if (reloadW > 0.5) {
+          const rg = new FillGradient({
+            start: { x: 0, y: 0 },
+            end: { x: 0, y: 1 },
+            textureSpace: 'local',
+          });
+          rg.addColorStop(0, HUD_THEME.reloadGradTop);
+          rg.addColorStop(1, HUD_THEME.reloadGradBot);
+          g.roundRect(pad + inset, magY + inset, reloadW, magBarH - inset * 2, magRr - 3).fill({
+            fill: rg,
+          });
+        }
+      } else {
+        const magRatio =
+          m.rifleMagazineSize > 0 ? Math.min(1, m.rifleMagAmmo / m.rifleMagazineSize) : 0;
+        const magFillW = Math.max(0, innerW * magRatio);
+        if (magFillW > 0.5) {
+          const mg = new FillGradient({
+            start: { x: 0, y: 0 },
+            end: { x: 0, y: 1 },
+            textureSpace: 'local',
+          });
+          mg.addColorStop(0, HUD_THEME.magGradTop);
+          mg.addColorStop(1, HUD_THEME.magGradBot);
+          g.roundRect(pad + inset, magY + inset, magFillW, magBarH - inset * 2, magRr - 3).fill({
+            fill: mg,
+          });
+        }
+      }
+    }
 
     const t = Math.floor(m.gameTime);
     const hudMetaChanged =
@@ -688,7 +1048,29 @@ export class GameScreen extends Container implements AppScreen {
       const ss = t % 60;
       this._timeText.text = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
       this._levelText.text = `Lv ${m.level}`;
-      this._weaponHudText.text = PLAYER_WEAPON_DEFS[m.equippedWeaponKind].displayName;
+    }
+
+    const wd2 = PLAYER_WEAPON_DEFS[m.equippedWeaponKind];
+    const weaponLine = `${wd2.displayName} · ${PLAYER_WEAPON_CATEGORY_LABELS[wd2.category]}`;
+    let weaponHudLayoutNeeded = false;
+    if (weaponLine !== this._lastWeaponHudLine) {
+      this._lastWeaponHudLine = weaponLine;
+      this._weaponHudText.text = weaponLine;
+      weaponHudLayoutNeeded = true;
+    }
+
+    const ammoHudLabel = wd2.category === 'melee' ? '近战' : '弹药';
+    const ammoLine =
+      wd2.category === 'melee'
+        ? '近战模式 · 扇形挥击'
+        : m.rifleReloadRemaining > 0
+          ? `换弹中 ${m.rifleReloadRemaining.toFixed(1)}s`
+          : `${ammoHudLabel} ${m.rifleMagAmmo} / ${m.rifleMagazineSize}`;
+    let ammoHudLayoutNeeded = false;
+    if (ammoLine !== this._lastAmmoHudLine) {
+      this._lastAmmoHudLine = ammoLine;
+      this._ammoHudText.text = ammoLine;
+      ammoHudLayoutNeeded = true;
     }
     const fpsLabel = `${Math.round(this._fpsSmoothed)} FPS`;
     let fpsLabelChanged = false;
@@ -702,7 +1084,6 @@ export class GameScreen extends Container implements AppScreen {
       const gearToast =
         m.chestToastTitle.includes('装备') ||
         m.chestToastTitle.includes('紫箱') ||
-        m.chestToastTitle.includes('军功') ||
         m.chestToastTitle.includes('重复') ||
         m.chestToastTitle.includes('空箱');
       const prefix = gearToast ? '战利品：' : '宝箱：';
@@ -721,7 +1102,13 @@ export class GameScreen extends Container implements AppScreen {
       this._chestToastText.visible = false;
     }
 
-    if (hudMetaChanged || this._devPanelOpen || fpsLabelChanged) {
+    if (
+      hudMetaChanged ||
+      this._devPanelOpen ||
+      fpsLabelChanged ||
+      weaponHudLayoutNeeded ||
+      ammoHudLayoutNeeded
+    ) {
       this._layoutHud();
     }
     if (this._hpBarDevHitDirty) {
@@ -739,13 +1126,38 @@ export class GameScreen extends Container implements AppScreen {
   }
 
   private _layoutHud(): void {
-    const pad = 14;
-    this._pauseFab.position.set(pad, this._h - 62);
-    this._dashFab.position.set(this._w - pad - 56, this._h - 68);
-    this._timeText.position.set(this._w - pad - this._timeText.width, pad);
-    this._weaponHudText.position.set(this._w - pad - this._weaponHudText.width, pad + 24);
-    this._levelText.position.set(this._w - pad - this._levelText.width, pad + 46);
-    this._fpsText.position.set(this._w - pad - this._fpsText.width, pad + 70);
+    const met = this._hudLeftLayoutMetrics();
+    const { pad, magY, magBarH } = met;
+    const wd = PLAYER_WEAPON_DEFS[this._model.equippedWeaponKind];
+    const ammoTextY = wd.category === 'melee' ? magY : magY + magBarH + 4;
+    const ins = HUD_THEME.rightInnerPad;
+    const rpY = pad + HUD_THEME.rightPanelTopOffset;
+    const innerRight = this._w - pad - ins;
+
+    const pill = this._ammoHudPill;
+    pill.clear();
+    const pw = Math.max(44, this._ammoHudText.width + 18);
+    const ph = 24;
+    const px = pad - 3;
+    const py = ammoTextY - 5;
+    pill
+      .roundRect(px, py, pw, ph, HUD_THEME.ammoPillRr)
+      .fill({ color: HUD_THEME.ammoPillBg, alpha: HUD_THEME.ammoPillBgAlpha });
+    pill
+      .roundRect(px, py, pw, ph, HUD_THEME.ammoPillRr)
+      .stroke({ width: 1.5, color: HUD_THEME.ammoPillStroke, alpha: HUD_THEME.ammoPillStrokeAlpha });
+    this._ammoHudText.position.set(pad + 7, ammoTextY);
+
+    this._layoutMobileCombatFabs();
+
+    const row0 = rpY + ins;
+    this._timeText.position.set(innerRight - this._timeText.width, row0);
+    const weaponY = row0 + Math.max(24, this._timeText.height) + 4;
+    this._weaponHudText.position.set(innerRight - this._weaponHudText.width, weaponY);
+    const levelY = weaponY + this._weaponHudText.height + 6;
+    this._levelText.position.set(innerRight - this._levelText.width, levelY);
+    const fpsY = levelY + Math.max(18, this._levelText.height) + 3;
+    this._fpsText.position.set(innerRight - this._fpsText.width, fpsY);
     if (this._devPanelOpen) {
       this._layoutDevPanel();
     }
@@ -832,29 +1244,38 @@ export class GameScreen extends Container implements AppScreen {
     this._refreshDevCheatIcons();
   }
 
-  /** 左下角 HUD：仅游戏速率；血条三连击后的作弊项在右下角 `_devCheatDock` */
+  /** 左下角倍率按钮总高度（与 `_buildCornerDevHud` 中 `padBg*2 + bhStack` 一致） */
+  private static readonly _CORNER_DEV_HUD_OUTER_H = 42;
+
+  /** 左下角倍率可点区域宽度（与 `_makeCornerTapRow` 一致） */
+  private static readonly _CORNER_RATE_BTN_W = 52;
+
+  /** 左下角 HUD：逻辑时间倍率（点击循环）；血条三连击后的作弊项在右下角 `_devCheatDock` */
   private _buildCornerDevHud(): void {
     this._cornerDevHud.eventMode = 'static';
     const bg = new Graphics();
-    const bw = 156;
+    const bw = GameScreen._CORNER_RATE_BTN_W;
     const bhStack = 30;
-    const rows = 1;
     const padBg = 6;
-    const hTotal = rows * bhStack + padBg * 2;
+    const hTotal = GameScreen._CORNER_DEV_HUD_OUTER_H;
     const wTotal = bw + padBg * 2;
-    bg.roundRect(0, 0, wTotal, hTotal, 8).fill({
-      color: 0x0c0806,
-      alpha: 0.72,
+    const cgrad = new FillGradient({
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 1 },
+      textureSpace: 'local',
     });
-    bg.roundRect(0, 0, wTotal, hTotal, 8).stroke({
-      width: 1,
-      color: 0x665544,
-      alpha: 0.55,
+    cgrad.addColorStop(0, HUD_THEME.btnGradTop);
+    cgrad.addColorStop(1, HUD_THEME.btnGradBot);
+    bg.roundRect(0, 0, wTotal, hTotal, 10).fill({ fill: cgrad });
+    bg.roundRect(0, 0, wTotal, hTotal, 10).stroke({
+      width: 2,
+      color: HUD_THEME.btnStroke,
+      alpha: HUD_THEME.btnStrokeAlpha,
     });
     const font = '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif';
     this._cornerRateLabel = new Text({
       text: '',
-      style: new TextStyle({ fontFamily: font, fontSize: 13, fontWeight: 'bold', fill: 0xffe8a8 }),
+      style: new TextStyle({ fontFamily: font, fontSize: 17, fontWeight: '900', fill: HUD_THEME.btnText }),
     });
     const rateRow = this._makeCornerTapRow(this._cornerRateLabel, () => {
       this._timeScale = cycleDevTimeScale();
@@ -867,12 +1288,12 @@ export class GameScreen extends Container implements AppScreen {
 
   private _makeCornerTapRow(label: Text, onTap: () => void): Container {
     const row = new Container();
-    const bw = 156;
+    const bw = GameScreen._CORNER_RATE_BTN_W;
     const bh = 28;
     const hit = new Graphics();
-    hit.rect(0, 0, bw, bh).fill({ color: 0xffffff, alpha: 0.06 });
-    label.anchor.set(0, 0.5);
-    label.position.set(6, bh * 0.5);
+    hit.rect(0, 0, bw, bh).fill({ color: 0xfff5ee, alpha: 0.12 });
+    label.anchor.set(0.5, 0.5);
+    label.position.set(bw * 0.5, bh * 0.5);
     row.addChild(hit, label);
     row.eventMode = 'static';
     row.cursor = 'pointer';
@@ -918,7 +1339,7 @@ export class GameScreen extends Container implements AppScreen {
 
   private _refreshCornerDevLabels(): void {
     if (this._cornerRateLabel) {
-      this._cornerRateLabel.text = `游戏速率 ${getDevTimeScale()}x · 点击循环`;
+      this._cornerRateLabel.text = `X${getDevTimeScale()}`;
     }
   }
 
@@ -942,12 +1363,6 @@ export class GameScreen extends Container implements AppScreen {
     }
   }
 
-  private _layoutCornerDevHud(): void {
-    const pad = 10;
-    const hTotal = 30 + 12;
-    this._cornerDevHud.position.set(pad, this._h - pad - hTotal);
-  }
-
   /** 作弊图标条锚在屏幕右下角，避让摇杆与安全区 */
   private _layoutDevPanel(): void {
     const pad = 14;
@@ -968,32 +1383,57 @@ export class GameScreen extends Container implements AppScreen {
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
         fontSize: 30,
-        fontWeight: 'bold',
+        fontWeight: '900',
         letterSpacing: 2,
-        fill: 0xfff4e0,
+        fill: 0xfffaf0,
         align: 'center',
+        stroke: { color: 0xa85c40, width: 3 },
         dropShadow: {
-          alpha: 0.75,
+          alpha: 0.4,
           angle: Math.PI / 2,
-          blur: 6,
-          color: 0x1a0f08,
-          distance: 3,
+          blur: 2,
+          color: 0x502820,
+          distance: 4,
         },
       }),
     });
-    this._levelUpTitle.anchor.set(0.5);
+    this._levelUpTitle.anchor.set(0.5, 0.5);
     this._levelUpSubtitle = new Text({
       text: '点选一张卡片获得强化',
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
         fontSize: 15,
-        fill: 0xb8a892,
+        fontWeight: '700',
+        fill: 0x8a5048,
         letterSpacing: 1,
         align: 'center',
       }),
     });
-    this._levelUpSubtitle.anchor.set(0.5);
+    this._levelUpSubtitle.anchor.set(0.5, 0.5);
+
+    const starStyle = new TextStyle({
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: 15,
+      fontWeight: '700',
+      fill: 0xff9078,
+      dropShadow: {
+        alpha: 0.85,
+        angle: Math.PI / 2,
+        blur: 6,
+        color: 0xffc8a8,
+        distance: 0,
+      },
+    });
+    for (const sx of [-40, 0, 40]) {
+      const st = new Text({ text: sx === 0 ? '✦' : '★', style: starStyle });
+      st.anchor.set(0.5);
+      st.position.set(sx, 0);
+      this._levelUpDecor.addChild(st);
+    }
+
+    this._levelUpRoot.addChild(this._levelUpDecor);
     this._levelUpRoot.addChild(this._levelUpTitle);
+    this._levelUpRoot.addChild(this._levelUpSubtitleBg);
     this._levelUpRoot.addChild(this._levelUpSubtitle);
   }
 
@@ -1023,11 +1463,11 @@ export class GameScreen extends Container implements AppScreen {
     if (k === 'rifleBulletCount') {
       return 0x7a8ad8;
     }
-    if (k === 'critChanceAdd') {
-      return 0xe06090;
-    }
     if (k === 'critOnHitDamageMult') {
       return 0xff7040;
+    }
+    if (k === 'luckMult') {
+      return 0xe06090;
     }
     if (k === 'pushObstacles') {
       return 0xb89868;
@@ -1035,25 +1475,25 @@ export class GameScreen extends Container implements AppScreen {
     return 0xc9a030;
   }
 
-  /** 卡片顶部圆章与准星；`halfH` 为卡片高度一半，用于竖排矮卡时缩放位置 */
+  /** 卡片顶部圆章与准星；浅色底板用略深描边，避免与首页暖色磁贴糊成一片 */
   private _paintLevelUpCardEmblem(g: Graphics, accent: number, halfH: number): void {
-    const cy = -halfH + Math.min(30, halfH * 0.42);
+    const cy = -halfH + Math.min(36, halfH * 0.44);
     const r0 = Math.min(22, halfH * 0.34);
     const r1 = Math.min(18, r0 * 0.85);
     const tick = Math.min(9, r0 * 0.42);
-    g.circle(0, cy, r0 + 4).fill({ color: 0x000000, alpha: 0.22 });
-    g.circle(0, cy, r0).fill({ color: accent, alpha: 0.5 });
-    g.circle(0, cy, r0).stroke({ width: 2, color: 0xfff0d0, alpha: 0.35 });
-    g.circle(0, cy, r1 * 0.38).fill({ color: 0x2a2218, alpha: 0.55 });
-    g.moveTo(-tick, cy).lineTo(tick, cy).stroke({ width: 1.5, color: 0xfff8e8, alpha: 0.45 });
-    g.moveTo(0, cy - tick).lineTo(0, cy + tick).stroke({ width: 1.5, color: 0xfff8e8, alpha: 0.45 });
+    g.circle(0, cy, r0 + 4).fill({ color: 0xffffff, alpha: 0.4 });
+    g.circle(0, cy, r0).fill({ color: accent, alpha: 0.78 });
+    g.circle(0, cy, r0).stroke({ width: 2, color: 0xc08068, alpha: 0.85 });
+    g.circle(0, cy, r1 * 0.38).fill({ color: 0x4a3830, alpha: 0.65 });
+    g.moveTo(-tick, cy).lineTo(tick, cy).stroke({ width: 1.5, color: 0xfffaf5, alpha: 0.75 });
+    g.moveTo(0, cy - tick).lineTo(0, cy + tick).stroke({ width: 1.5, color: 0xfffaf5, alpha: 0.75 });
   }
 
-  /** 竖屏单列：宽度贴屏幕留白，高度压缩以容纳三张 */
+  /** 竖屏单列：保证标题+说明+底条留白，避免长文案贴底条 */
   private _levelUpCardMetrics(): { w: number; h: number } {
     const side = 16;
     const w = Math.min(320, Math.max(200, this._w - side * 2));
-    const h = Math.min(140, Math.max(118, Math.round(w * 0.42)));
+    const h = Math.min(162, Math.max(134, Math.round(w * 0.48)));
     return { w, h };
   }
 
@@ -1072,33 +1512,35 @@ export class GameScreen extends Container implements AppScreen {
     root.addChild(inner);
 
     const shadow = new Graphics();
-    shadow.roundRect(-w * 0.5 + 4, -h * 0.5 + 6, w, h, rr).fill({ color: 0x000000, alpha: 0.42 });
+    shadow.roundRect(-w * 0.5 + 3, -h * 0.5 + 5, w, h, rr).fill({ color: 0x884020, alpha: 0.32 });
 
     const faceGrad = new FillGradient({
       start: { x: 0, y: 0 },
       end: { x: 0, y: 1 },
       textureSpace: 'local',
     });
-    faceGrad.addColorStop(0, 0x4a3d32);
-    faceGrad.addColorStop(0.35, 0x322820);
-    faceGrad.addColorStop(1, 0x1a1510);
+    // 与首页 `home-menu-btn` 浅色渐变同系
+    faceGrad.addColorStop(0, 0xfffefb);
+    faceGrad.addColorStop(0.48, 0xffead8);
+    faceGrad.addColorStop(1, 0xffd0b8);
 
     const face = new Graphics();
     face.roundRect(-w * 0.5, -h * 0.5, w, h, rr).fill({ fill: faceGrad });
 
     const topSheen = new FillGradient({
       start: { x: 0, y: 0 },
-      end: { x: 0, y: 0.45 },
+      end: { x: 0, y: 0.42 },
       textureSpace: 'local',
     });
     topSheen.addColorStop(0, accent);
     topSheen.addColorStop(0.55, accent);
     topSheen.addColorStop(1, accent);
 
+    const sheenH = Math.min(54, Math.round(h * 0.38));
     const sheen = new Graphics();
-    sheen.roundRect(-w * 0.5 + 3, -h * 0.5 + 3, w - 6, 56, rr - 3).fill({
+    sheen.roundRect(-w * 0.5 + 3, -h * 0.5 + 3, w - 6, sheenH, rr - 3).fill({
       fill: topSheen,
-      alpha: 0.14,
+      alpha: 0.11,
     });
 
     const emblem = new Graphics();
@@ -1106,15 +1548,15 @@ export class GameScreen extends Container implements AppScreen {
 
     const innerRim = new Graphics();
     innerRim.roundRect(-w * 0.5 + 5, -h * 0.5 + 5, w - 10, h - 10, rr - 5).stroke({
-      width: 1,
-      color: 0xfff8e8,
-      alpha: 0.12,
+      width: 1.5,
+      color: 0xffffff,
+      alpha: 0.55,
     });
 
     const accentBar = new Graphics();
     accentBar
-      .roundRect(-w * 0.5 + 12, h * 0.5 - 20, w - 24, 4, 2)
-      .fill({ color: accent, alpha: 0.85 });
+      .roundRect(-w * 0.5 + 12, h * 0.5 - 20, w - 24, 3, 2)
+      .fill({ color: accent, alpha: 0.88 });
 
     const outerRim = new Graphics();
     const paintOuterRim = (hot: boolean): void => {
@@ -1131,7 +1573,7 @@ export class GameScreen extends Container implements AppScreen {
     const tw = card.tier === 'SSS' ? 46 : card.tier === 'SS' ? 38 : 30;
     const th = 24;
     const tbx = w * 0.5 - 10 - tw;
-    const tby = -h * 0.5 + 10;
+    const tby = -h * 0.5 + 12;
     const tierBg = new Graphics();
     tierBg
       .roundRect(tbx, tby, tw, th, 6)
@@ -1152,59 +1594,50 @@ export class GameScreen extends Container implements AppScreen {
 
     inner.addChild(shadow, face, sheen, emblem, innerRim, accentBar, outerRim, tierBadge);
 
+    const textPadX = 36;
+    const wrapW = Math.max(72, w - textPadX);
     const title = new Text({
       text: card.title,
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
-        fontSize: 19,
-        fontWeight: 'bold',
-        fill: 0xfff6e8,
+        fontSize: 18,
+        fontWeight: '800',
+        fill: 0x5a3830,
         align: 'center',
-        letterSpacing: 0.5,
+        letterSpacing: 0.4,
         wordWrap: true,
-        wordWrapWidth: w - 28,
+        wordWrapWidth: wrapW,
+        // 无空格时整段为一个 token，须 breakWords 才能在 wordWrapWidth 内拆行
+        breakWords: true,
         lineHeight: 24,
-        dropShadow: {
-          alpha: 0.55,
-          angle: Math.PI / 2,
-          blur: 3,
-          color: 0x000000,
-          distance: 1,
-        },
       }),
     });
     title.anchor.set(0.5, 0);
-    title.position.set(0, -22);
+    title.position.set(0, -halfH * 0.26);
 
     const desc = new Text({
       text: card.description,
       style: new TextStyle({
         fontFamily: '"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif',
-        fontSize: 14,
-        fill: 0xd8ccb8,
+        fontSize: 13,
+        fill: 0x7a5850,
         align: 'center',
         wordWrap: true,
-        wordWrapWidth: w - 24,
-        lineHeight: 22,
-        letterSpacing: 0.3,
-        dropShadow: {
-          alpha: 0.35,
-          angle: Math.PI / 2,
-          blur: 2,
-          color: 0x000000,
-          distance: 1,
-        },
+        wordWrapWidth: wrapW,
+        breakWords: true,
+        lineHeight: 21,
+        letterSpacing: 0.2,
       }),
     });
     desc.anchor.set(0.5, 0);
-    desc.position.set(0, 18);
+    desc.position.set(0, title.y + title.height + 11);
 
     inner.addChild(title, desc);
 
     root.hitArea = new Rectangle(-w * 0.5, -h * 0.5, w, h);
     root.on('pointerover', () => {
       paintOuterRim(true);
-      inner.scale.set(1.045);
+      inner.scale.set(1.03);
     });
     root.on('pointerout', () => {
       paintOuterRim(false);
@@ -1212,7 +1645,11 @@ export class GameScreen extends Container implements AppScreen {
     });
     root.on('pointertap', (e: FederatedPointerEvent) => {
       e.stopPropagation();
+      const wasAwaiting = this._model.awaitingLevelUp;
       this._model.applyLevelUpChoice(card.id);
+      if (wasAwaiting && !this._model.awaitingLevelUp) {
+        playLevelUpConfirmSfx();
+      }
     });
     return root;
   }
@@ -1224,35 +1661,52 @@ export class GameScreen extends Container implements AppScreen {
       end: { x: 0.5, y: 1 },
       textureSpace: 'local',
     });
-    dimGrad.addColorStop(0, 0x0c0a08);
-    dimGrad.addColorStop(0.45, 0x080706);
-    dimGrad.addColorStop(1, 0x12100c);
-    this._levelUpDim.rect(0, 0, this._w, this._h).fill({ fill: dimGrad, alpha: 0.9 });
+    // 与首页 `.page-home` 一致的暖色光晕 + 斜向渐变（简化为纵向多段）
+    dimGrad.addColorStop(0, 0xfff8f0);
+    dimGrad.addColorStop(0.38, 0xffe0c8);
+    dimGrad.addColorStop(0.72, 0xffc8a8);
+    dimGrad.addColorStop(1, 0xf09868);
+    this._levelUpDim.rect(0, 0, this._w, this._h).fill({ fill: dimGrad, alpha: 0.92 });
 
     const cx = this._w * 0.5;
-    this._levelUpTitle.position.set(cx, this._h * 0.12);
-    this._levelUpSubtitle.position.set(cx, this._h * 0.12 + 36);
+    const titleY = this._h * 0.118;
+    const subY = titleY + 44;
+    this._levelUpTitle.style.fontSize = levelUpTitleFontPx(this._h);
+    this._levelUpTitle.position.set(cx, titleY);
+    this._levelUpSubtitle.position.set(cx, subY);
+    this._levelUpDecor.position.set(cx, this._h * 0.066);
+
+    this._levelUpSubtitleBg.clear();
+    const padX = 20;
+    const padY = 9;
+    const sw = this._levelUpSubtitle.width + padX * 2;
+    const sh = this._levelUpSubtitle.height + padY * 2;
+    const pillR = Math.min(999, sh * 0.5);
+    this._levelUpSubtitleBg
+      .roundRect(cx - sw * 0.5, subY - sh * 0.5, sw, sh, pillR)
+      .fill({ color: 0xffffff, alpha: 0.55 })
+      .stroke({ width: 2, color: 0xffffff, alpha: 0.88 });
 
     const cards = this._levelUpChoicesHolder.children as Container[];
     const n = cards.length;
     if (n === 0) {
       return;
     }
-    const gap = 14;
+    const gap = 20;
     const side = 16;
     const { w: cw, h: ch } = this._levelUpCardMetrics();
     const maxRowW = this._w - side * 2;
     const rowW = n * cw + (n - 1) * gap;
     if (rowW <= maxRowW) {
       const startX = cx - rowW * 0.5 + cw * 0.5;
-      const cy = this._h * 0.54;
+      const cy = this._h * 0.548;
       for (let i = 0; i < n; i++) {
         cards[i]!.position.set(startX + i * (cw + gap), cy);
       }
     } else {
       const colH = n * ch + (n - 1) * gap;
-      const yMid = this._h * 0.52;
-      const y0 = Math.max(this._h * 0.26 + ch * 0.5, yMid - colH * 0.5 + ch * 0.5);
+      const yMid = this._h * 0.528;
+      const y0 = Math.max(this._h * 0.228 + ch * 0.5, yMid - colH * 0.5 + ch * 0.5);
       for (let i = 0; i < n; i++) {
         cards[i]!.position.set(cx, y0 + i * (ch + gap));
       }
@@ -1267,6 +1721,7 @@ export class GameScreen extends Container implements AppScreen {
       if (offerKey !== this._levelUpOfferKey) {
         this._levelUpOfferKey = offerKey;
         this._rebuildLevelUpCards();
+        playLevelUpPanelSfx();
       }
       this._layoutLevelUp();
       this._devRoot.visible = false;
@@ -1340,10 +1795,15 @@ export class GameScreen extends Container implements AppScreen {
     const m = this._model;
     const chestN = m.sessionPurpleChestBundles.length;
     this._gameOverStats.style.wordWrapWidth = Math.min(320, this._w - 32);
+    const coinGain = computeRunCoinReward({
+      killsThisRun: m.sessionKills,
+      survivalSec: m.gameTime,
+    });
     this._gameOverStats.text = [
       `存活 ${formatDurationCn(m.gameTime)}`,
       `击破 ${m.sessionKills}`,
       `本局紫箱 ${chestN} 次`,
+      `本局金币 +${coinGain}（返回首页时入账）`,
     ].join('\n');
     this._gameOverTitle.position.set(this._w * 0.5, this._h * 0.34);
     this._gameOverStats.position.set(this._w * 0.5, this._h * 0.46);
@@ -1352,6 +1812,13 @@ export class GameScreen extends Container implements AppScreen {
 
   private _syncGameOverVisibility(): void {
     const show = this._model.gameOver;
+    if (show && !this._gameOverSfxPlayed) {
+      this._gameOverSfxPlayed = true;
+      playGameOverSfx();
+    }
+    if (!show) {
+      this._gameOverSfxPlayed = false;
+    }
     this._gameOverRoot.visible = show;
     if (show) {
       this._layoutGameOver();
@@ -1376,7 +1843,9 @@ export class GameScreen extends Container implements AppScreen {
         v.root.visible = false;
         continue;
       }
-      v.sync(e, freezeMotion, enemyKindFill(e.kind), enemyKindStroke(e.kind), detail);
+      const fill = e.isElite ? ELITE_ENEMY_FILL : enemyKindFill(e.kind);
+      const stroke = e.isElite ? ELITE_ENEMY_STROKE : enemyKindStroke(e.kind);
+      v.sync(e, freezeMotion, fill, stroke, detail);
       v.root.visible = true;
     }
     for (let i = list.length; i < pool.length; i++) {

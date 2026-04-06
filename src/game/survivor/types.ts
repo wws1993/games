@@ -53,6 +53,8 @@ export interface Enemy {
    * 取 `floor(本局 gameTime/60)+1`，随分钟数无限增长（无 99 封顶）
    */
   level: number;
+  /** 精英小怪：更高血攻，击杀必掉紫装宝箱（见 `survivorBalance.enemy.elite*`） */
+  isElite?: boolean;
 }
 
 /** 纹理变体：砖纹横砌 / 木板竖纹 / 斜纹 / 碎石噪点 */
@@ -92,8 +94,10 @@ export interface Bullet {
   hitEnemyIds?: number[];
   /** 世界层绘制色；省略则用默认金黄 */
   displayColor?: number;
-  /** 撞土房障碍时剩余可反弹次数；由 `SurvivorGameModel.projectileBounceAdd` 在发射时写入，每反弹一次减 1，为 0 则穿障时销毁 */
+  /** 撞土房或敌身反弹剩余次数；由 `projectileBounceAdd` 在发射时写入，每反弹一次减 1；障碍侧为 0 则穿障销毁，敌侧在穿透用尽时尝试反弹 */
   obstacleBouncesRemaining?: number;
+  /** 发射时快照的玩法角色暴击率加算（0～1），命中时与 `critChance` 等叠算，避免飞行中切枪导致暴击错位 */
+  heroCritChanceAdd?: number;
 }
 
 /** 敌弹：机枪弹直线命中玩家；炮弹飞至落点后范围伤害 */
@@ -123,7 +127,7 @@ export interface WorldChest {
   /** `gameTime` 达到后未拾取则移除 */
   despawnAt: number;
   /**
-   * 省略或 `buff`：随机限时增益（与 `chestBuffs`）；`gear`：紫箱，拾取时按 `monsterLevel` 随机九部位装备词条并入库（`gearAffixConfig` / `applyPurpleChestLoot`）
+   * 省略或 `buff`：随机限时增益（与 `chestBuffs`）；`gear`：紫箱，拾取时按 `monsterLevel` 随机九部位装备词条并入库，并独立概率额外解锁一把主武器（`applyPurpleChestLoot`）
    */
   chestKind?: 'buff' | 'gear';
   /** 装备箱：被击杀敌人等级，影响开箱件数（1～5）与等阶（见 `gearAffixConfig`） */

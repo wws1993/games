@@ -14,7 +14,7 @@ export type { EnemyKind } from '../config/enemyConfig';
 /** 远程类型：机枪直线弹、炮弹落点爆炸 */
 export type EnemyRangedType = 'mg' | 'shell';
 
-/** 单兵种静态定义（血量/速度等为 0 分钟基准，局内按分钟 ×1.05 缩放） */
+/** 单兵种静态定义（血量/速度等为开局 0 秒基准，局内乘 `difficultyMultiplier(gameTime)` 连续增长） */
 export interface EnemyDef {
   /** 碰撞半径 */
   radius: number;
@@ -107,12 +107,14 @@ export function getSpawnWeightsForMode(gameTimeSec: number, mode: GameModeId): S
 }
 
 /**
- * 每分钟全体怪物生命与伤害 ×1.05（从第 0 分钟起算层数）
+ * 敌血量与攻击随局内时间连续增长：`pow(f, gameTimeSec/60)`，其中 f 为 `survivorBalance.enemy.difficultyPerMinuteFactor`（与「每整分钟 ×f」在整分处同值，秒间平滑上升）
  * @param gameTimeSec - 本局秒数
  */
 export function difficultyMultiplier(gameTimeSec: number): number {
-  const minute = Math.floor(gameTimeSec / 60);
-  return Math.pow(1.05, minute);
+  const g = Math.max(0, gameTimeSec);
+  const f = survivorBalance.enemy.difficultyPerMinuteFactor;
+  const factor = Number.isFinite(f) && f > 0 ? f : 1.05;
+  return Math.pow(factor, g / 60);
 }
 
 /** 从开局间隔拉满到 `SPAWN_INTERVAL_END_SEC` 所用秒数（越短中期越密） */

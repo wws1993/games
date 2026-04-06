@@ -17,6 +17,16 @@ export interface SurvivorBalanceConfig {
     moveSpeedScale: number;
     /** 敌机枪弹 / 炮弹飞行速度 ×（表内 `projSpeed` 基准再乘此项，便于整体降弹速） */
     projectileSpeedScale: number;
+    /**
+     * 敌人生成时生命、接触伤害、远程子弹/炮弹伤害均乘 `pow(difficultyPerMinuteFactor, gameTimeSec/60)`，随局内秒数连续增长（非整分钟阶跃）
+     */
+    difficultyPerMinuteFactor: number;
+    /** 随机精英小怪：生成概率与相对普通怪的血量/攻击倍率；击杀必掉紫箱 */
+    elite: {
+      spawnChance: number;
+      hpMult: number;
+      attackMult: number;
+    };
   };
 }
 
@@ -26,12 +36,19 @@ export const survivorBalance: SurvivorBalanceConfig = {
     maxRange: 420,
   },
   spawn: {
-    /** 在表基准上再放慢约 30% 刷怪（原 1.5 × 1/0.7） */
-    intervalScale: 1.5 / 0.7,
+    /** 在表基准上再放慢：`(1.5/0.7)×1.25`，相对此前配置再拉长约 25% 刷怪间隔 */
+    intervalScale: (1.5 / 0.7) * 1.25,
   },
   enemy: {
     /** 在表基准上再 ×0.7 怪物地面移速（原 0.65 × 0.7） */
     moveSpeedScale: 0.65 * 0.7,
-    projectileSpeedScale: 0.72,
+    projectileSpeedScale: 0.372,
+    /** 每经过约 60 秒敌血与攻×1.05；改大则后期更陡（如 1.06） */
+    difficultyPerMinuteFactor: 1.05,
+    elite: {
+      spawnChance: 0.01,
+      hpMult: 5,
+      attackMult: 3,
+    },
   },
 };

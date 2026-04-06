@@ -37,6 +37,27 @@ export const GEAR_SET_DEFS: readonly GearSetDef[] = [
     bonus6: '宝箱增益 +10%，经验获取 +6%',
     bonus9: '全属性词条效果 +5%（含普通与稀有描述类）',
   },
+  {
+    id: 'set_fanshang',
+    name: '荆棘卫垒',
+    bonus3: '反伤倍率 ×1.12（受到伤害时按倍率反弹）',
+    bonus6: '反伤倍率 ×1.15（与三件套叠乘）',
+    bonus9: '反伤倍率 ×1.18（与三、六件套叠乘）',
+  },
+  {
+    id: 'set_xixue',
+    name: '血契追猎',
+    bonus3: '吸血 +2%（与词条吸血相加，仍受上限约束）',
+    bonus6: '吸血 +3%',
+    bonus9: '吸血 +5%；击杀时额外回复最大生命 0.5%',
+  },
+  {
+    id: 'set_danmu',
+    name: '弹幕交响',
+    bonus3: '步枪齐射额外 +1 发弹丸',
+    bonus6: '齐射再 +1 发',
+    bonus9: '齐射再 +1 发（共 +3，仍受单发上限约束）',
+  },
 ];
 
 /** 按套装 id 取定义，未找到返回 undefined */

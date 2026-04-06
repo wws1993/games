@@ -34,7 +34,8 @@ export function drawMapGrassDecor(g: Graphics, worldSize: number, seed: number):
       }
       const nBlade = 2 + (h % 4);
       const baseA = ((h % 360) / 360) * 0.5 - 0.25;
-      const palette = [0x4a7c42, 0x3a5c34, 0x558848, 0x5a9260, 0x2d4a28] as const;
+      /** 与局内暖色战场底协调的草叶色（略偏黄绿） */
+      const palette = [0x5a8c48, 0x4a7038, 0x6a9858, 0x6ba060, 0x3d5a30] as const;
       for (let k = 0; k < nBlade; k++) {
         const ang = baseA + (k - nBlade * 0.5) * 0.42;
         const len = 3.2 + ((h >> (k * 5)) & 7) * 0.6;

@@ -1,5 +1,5 @@
 /**
- * 紫箱装备配置表：200 条独立条目；掉落时按部位 + 等阶从表中随机；S/SS/SSS 部分绑定套装 id（见 `gearSetConfig`）
+ * 紫箱装备配置表：200 条独立条目；掉落时按部位 + 等阶从表中随机；高阶含套装件与同阶散件（`setId === null`），见 `gearSetConfig`
  */
 
 import type { GearGradeId } from './gearGradeConfig';
@@ -29,7 +29,7 @@ const SLOTS: readonly GearDropSlotId[] = [
 
 const SLOT_TAG = ['盔', '衣', '肩', '武', '副', '手', '带', '靴', '饰'] as const;
 
-/** 构建 200 条：27 件套装 + 173 件散件，保证每部位×等阶池非空 */
+/** 构建 200 条：54 件套装 + 27 件 S/SS/SSS 散件 + 119 件 E～A 散件；各阶每部位池含套装与散件时随机可出非套装 */
 function buildGearEquipmentCatalog(): GearEquipmentCatalogEntry[] {
   const out: GearEquipmentCatalogEntry[] = [];
   let n = 0;
@@ -39,6 +39,9 @@ function buildGearEquipmentCatalog(): GearEquipmentCatalogEntry[] {
     { setId: 'set_tiexue', prefix: '铁血', grade: 'S' },
     { setId: 'set_yexi', prefix: '夜袭', grade: 'SS' },
     { setId: 'set_judi', prefix: '根据地', grade: 'SSS' },
+    { setId: 'set_fanshang', prefix: '荆棘', grade: 'S' },
+    { setId: 'set_xixue', prefix: '血契', grade: 'SS' },
+    { setId: 'set_danmu', prefix: '弹幕', grade: 'SSS' },
   ];
   const setPart = ['钢盔', '胸甲', '护肩', '主战火器', '副武器', '护手', '武装带', '军靴', '纪念章'];
 
@@ -71,11 +74,16 @@ function buildGearEquipmentCatalog(): GearEquipmentCatalogEntry[] {
     }
   };
 
-  addRotating('E', 45, (si, seq) => `民兵${SLOT_TAG[si]}·${seq + 1}`);
-  addRotating('D', 40, (si, seq) => `补给${SLOT_TAG[si]}·${seq + 1}`);
-  addRotating('C', 35, (si, seq) => `制式${SLOT_TAG[si]}·${seq + 1}`);
-  addRotating('B', 30, (si, seq) => `加强${SLOT_TAG[si]}·${seq + 1}`);
-  addRotating('A', 23, (si, seq) => `精锐${SLOT_TAG[si]}·${seq + 1}`);
+  /** 高阶散件：每部位 1 条，与同名等阶套装件共存，`pickRandomCatalogEntry` 均匀随机 */
+  addRotating('S', 9, (si, seq) => `试制${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('SS', 9, (si, seq) => `特供${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('SSS', 9, (si, seq) => `功勋${SLOT_TAG[si]}·${seq + 1}`);
+
+  addRotating('E', 30, (si, seq) => `民兵${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('D', 31, (si, seq) => `补给${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('C', 24, (si, seq) => `制式${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('B', 20, (si, seq) => `加强${SLOT_TAG[si]}·${seq + 1}`);
+  addRotating('A', 14, (si, seq) => `精锐${SLOT_TAG[si]}·${seq + 1}`);
 
   return out;
 }

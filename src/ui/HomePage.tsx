@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { GAME_MODE_DEFS } from '../game/config/gameModeConfig';
+import { loadAchievementSave } from '../game/meta/achievementStore';
 import { setPendingGameMode } from '../game/meta/gameModeSession';
 
 /** 与仓库 `public/bg-home.png` 对应 */
@@ -52,7 +53,9 @@ export function HomePage(): JSX.Element {
         >
           敌后幸存者
         </h1>
-        <p className="page-home-subtitle">挑个入口出发吧～</p>
+        <div className="home-coins-bar" aria-label="当前金币">
+          <span className="home-coins-value">金币 {loadAchievementSave().coins}</span>
+        </div>
       </div>
       <nav className="home-menu" aria-label="主菜单">
         <button
@@ -63,6 +66,13 @@ export function HomePage(): JSX.Element {
           开始游戏
         </button>
         <div className="home-menu-grid" role="group" aria-label="其他功能">
+          <button
+            type="button"
+            className="home-menu-btn home-menu-btn--tile"
+            onClick={() => void navigate('/shop')}
+          >
+            商店
+          </button>
           <button
             type="button"
             className="home-menu-btn home-menu-btn--tile"
@@ -102,8 +112,14 @@ export function HomePage(): JSX.Element {
       </nav>
 
       {modeOpen ? (
-        <div className="home-mode-overlay" role="dialog" aria-modal="true" aria-labelledby="home-mode-title">
-          <div className="home-mode-panel">
+        <div
+          className="home-mode-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="home-mode-title"
+          onClick={() => setModeOpen(false)}
+        >
+          <div className="home-mode-panel" onClick={(e) => e.stopPropagation()}>
             <h2 id="home-mode-title" className="home-mode-title">
               选择作战模式
             </h2>

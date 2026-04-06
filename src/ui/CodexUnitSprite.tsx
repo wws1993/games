@@ -1,5 +1,10 @@
-import type { CodexPortraitKind } from '../game/codex/codexData';
+import type { CodexHeroPortraitKind, CodexPortraitKind } from '../game/codex/codexData';
+import { isCodexHeroPortraitKind } from '../game/codex/codexData';
 import type { EnemyKind } from '../game/config/enemyConfig';
+import {
+  DEFAULT_PLAYER_VECTOR_PALETTE,
+  type PlayerVectorPalette,
+} from '../game/meta/metaUnlockShopConfig';
 import { enemyKindFill, enemyKindStroke } from '../game/survivor/enemyWorldVisual';
 
 /** 0xRRGGBB → `#rrggbb` */
@@ -7,45 +12,207 @@ function hx(n: number): string {
   return `#${n.toString(16).padStart(6, '0')}`;
 }
 
-/** 与 `playerWorldVisual`  idle 配色一致 */
-const HERO = {
-  body: '#5c6d7c',
-  shadow: '#4a5a68',
-  skin: '#c49a78',
-  cap: '#3a4858',
-  brim: '#2a3442',
-  star: '#d82828',
-  belt: '#4a3828',
-  leg: '#3a342c',
-  outline: '#2a2218',
-  wood: '#4a3528',
-  metal: '#2c3238',
-};
+/** 将存档矢量配色转为 SVG 用 hex（与 `playerWorldVisual` 一致） */
+function heroPaletteToCss(
+  p: PlayerVectorPalette,
+): {
+  body: string;
+  shadow: string;
+  skin: string;
+  cap: string;
+  brim: string;
+  star: string;
+  belt: string;
+  leg: string;
+  outline: string;
+} {
+  return {
+    body: hx(p.uniformBody),
+    shadow: hx(p.uniformShadow),
+    skin: hx(p.skin),
+    cap: hx(p.capBody),
+    brim: hx(p.capBrim),
+    star: hx(p.capStar),
+    belt: hx(p.belt),
+    leg: hx(p.legCloth),
+    outline: hx(p.outline),
+  };
+}
 
 function gunDark(fill: number): string {
   return hx(((fill & 0xfefefe) >> 1) | 0x080808);
 }
 
-/** 游击队员 idle，枪指向右侧 */
-function SpriteHero(): JSX.Element {
+/** 游击队员：制式帽徽、三八式步枪、背带；配色与枪木/金属来自局外商店存档 */
+function SpriteHeroGuerrilla({
+  palette,
+  gunWood,
+  gunMetal,
+}: {
+  palette: PlayerVectorPalette;
+  gunWood: number;
+  gunMetal: number;
+}): JSX.Element {
+  const H = heroPaletteToCss(palette);
+  const wood = hx(gunWood);
+  const metal = hx(gunMetal);
   const y = -4;
   return (
     <g strokeLinecap="round" strokeLinejoin="round">
-      <ellipse cx="0" cy={y} rx="9" ry="11" fill={HERO.body} stroke={HERO.outline} strokeWidth="2" />
-      <rect x="-5" y={y + 1} width="10" height="3" rx="1" fill={HERO.shadow} />
-      <line x1="-5" y1={y + 5} x2="5" y2={y + 5} stroke={HERO.belt} strokeWidth="2" />
-      <circle cx="0" cy={y - 10} r="5" fill={HERO.skin} stroke={HERO.outline} strokeWidth="2" />
-      <ellipse cx="0" cy={y - 13} rx="8" ry="5" fill={HERO.cap} stroke={HERO.outline} strokeWidth="2" />
-      <rect x="1" y={y - 12} width="9" height="3" rx="1" fill={HERO.brim} />
-      <circle cx="4" cy={y - 12} r="2.2" fill={HERO.star} />
-      <line x1="-4" y1={y + 9} x2="-4" y2={y + 17} stroke={HERO.leg} strokeWidth="3" />
-      <line x1="4" y1={y + 9} x2="4" y2={y + 17} stroke={HERO.leg} strokeWidth="3" />
+      <line x1="-6" y1={y - 4} x2="6" y2={y + 6} stroke={H.shadow} strokeWidth="2.5" opacity="0.55" />
+      <ellipse cx="0" cy={y} rx="9" ry="11" fill={H.body} stroke={H.outline} strokeWidth="2" />
+      <rect x="-5" y={y + 1} width="10" height="3" rx="1" fill={H.shadow} />
+      <line x1="-5" y1={y + 5} x2="5" y2={y + 5} stroke={H.belt} strokeWidth="2" />
+      <circle cx="0" cy={y - 10} r="5" fill={H.skin} stroke={H.outline} strokeWidth="2" />
+      <ellipse cx="0" cy={y - 13} rx="8" ry="5" fill={H.cap} stroke={H.outline} strokeWidth="2" />
+      <rect x="1" y={y - 12} width="9" height="3" rx="1" fill={H.brim} />
+      <circle cx="4" cy={y - 12} r="2.2" fill={H.star} />
+      <line x1="-4" y1={y + 9} x2="-4" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <line x1="4" y1={y + 9} x2="4" y2={y + 17} stroke={H.leg} strokeWidth="3" />
       <g transform={`translate(5 ${y - 0.5})`}>
-        <rect x="0" y="-2.5" width="10" height="5" rx="2" fill={HERO.wood} />
-        <rect x="9" y="-2" width="8" height="4" rx="1" fill={HERO.metal} />
+        <rect x="0" y="-2.5" width="11" height="5" rx="2" fill={wood} />
+        <rect x="10" y="-2" width="9" height="4" rx="1" fill={metal} />
+        <rect x="17" y="-1.5" width="5" height="3" rx="0.5" fill={metal} opacity="0.9" />
       </g>
     </g>
   );
+}
+
+/** 燕双鹰：长风衣轮廓、双持短枪（驳壳/快机意象） */
+function SpriteHeroYanShuangying({
+  palette,
+  gunWood,
+  gunMetal,
+}: {
+  palette: PlayerVectorPalette;
+  gunWood: number;
+  gunMetal: number;
+}): JSX.Element {
+  const H = heroPaletteToCss(palette);
+  const wood = hx(gunWood);
+  const metal = hx(gunMetal);
+  const y = -4;
+  const coat = H.shadow;
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <path
+        d={`M -12 ${y + 10} L -9 ${y - 14} L 9 ${y - 14} L 12 ${y + 10} L 7 ${y + 11} L -7 ${y + 11} Z`}
+        fill={H.body}
+        stroke={H.outline}
+        strokeWidth="1.8"
+        opacity="0.92"
+      />
+      <ellipse cx="0" cy={y} rx="7" ry="9" fill={H.body} stroke={H.outline} strokeWidth="1.8" />
+      <line x1="-5" y1={y + 4} x2="5" y2={y + 4} stroke={coat} strokeWidth="2.2" opacity="0.75" />
+      <circle cx="0" cy={y - 10} r="4.8" fill={H.skin} stroke={H.outline} strokeWidth="1.8" />
+      <path
+        d={`M -7 ${y - 14} Q 0 ${y - 19} 7 ${y - 14} L 6 ${y - 11} L -6 ${y - 11} Z`}
+        fill={H.cap}
+        stroke={H.outline}
+        strokeWidth="1.6"
+      />
+      <ellipse cx="0" cy={y - 15} rx="2" ry="1.2" fill={H.star} opacity="0.85" />
+      <line x1="-5" y1={y + 9} x2="-6" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <line x1="5" y1={y + 9} x2="6" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <g transform={`translate(-5 ${y + 2}) rotate(-42)`}>
+        <rect x="-10" y="-2" width="9" height="3.5" rx="1" fill={wood} />
+        <rect x="-10" y="-2" width="3.5" height="3.5" rx="0.5" fill={metal} />
+      </g>
+      <g transform={`translate(5 ${y + 2}) rotate(42)`}>
+        <rect x="1" y="-2" width="9" height="3.5" rx="1" fill={wood} />
+        <rect x="6.5" y="-2" width="3.5" height="3.5" rx="0.5" fill={metal} />
+      </g>
+    </g>
+  );
+}
+
+/** 大刀队长：宽刃大刀斜持、红缨、环首刀柄 */
+function SpriteHeroDadaoLeader({ palette }: { palette: PlayerVectorPalette }): JSX.Element {
+  const H = heroPaletteToCss(palette);
+  const blade = '#c8d4dc';
+  const edge = '#687482';
+  const tassel = '#e03028';
+  const y = -4;
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="0" cy={y} rx="9" ry="11" fill={H.body} stroke={H.outline} strokeWidth="2" />
+      <rect x="-5" y={y + 1} width="10" height="3" rx="1" fill={H.shadow} />
+      <line x1="-5" y1={y + 5} x2="5" y2={y + 5} stroke={H.belt} strokeWidth="2" />
+      <circle cx="0" cy={y - 10} r="5" fill={H.skin} stroke={H.outline} strokeWidth="2" />
+      <ellipse cx="0" cy={y - 13} rx="8" ry="5" fill={H.cap} stroke={H.outline} strokeWidth="2" />
+      <rect x="1" y={y - 12} width="9" height="3" rx="1" fill={H.brim} />
+      <circle cx="3" cy={y - 12} r="2" fill={H.star} />
+      <line x1="-5" y1={y + 9} x2="-6" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <line x1="5" y1={y + 9} x2="6" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <g transform={`translate(-2 ${y - 1}) rotate(-52)`}>
+        <path
+          d="M 4 8 L 6 -4 L 9 -16 L 13 -18 L 16 -2 L 12 10 L 6 8 Z"
+          fill={blade}
+          stroke={edge}
+          strokeWidth="1.4"
+        />
+        <circle cx="15" cy="-8" r="3.5" fill={tassel} stroke={H.outline} strokeWidth="1.1" />
+        <circle cx="5" cy="6" r="3.2" fill={H.shadow} stroke={H.outline} strokeWidth="1.3" />
+      </g>
+    </g>
+  );
+}
+
+/** 神枪手：长步枪、表尺与瞄准镜意象 */
+function SpriteHeroSharpshooter({
+  palette,
+  gunWood,
+  gunMetal,
+}: {
+  palette: PlayerVectorPalette;
+  gunWood: number;
+  gunMetal: number;
+}): JSX.Element {
+  const H = heroPaletteToCss(palette);
+  const wood = hx(gunWood);
+  const metal = hx(gunMetal);
+  const scope = gunDark(gunMetal);
+  const y = -4;
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="0" cy={y} rx="9" ry="11" fill={H.body} stroke={H.outline} strokeWidth="2" />
+      <rect x="-5" y={y + 1} width="10" height="3" rx="1" fill={H.shadow} />
+      <line x1="-5" y1={y + 5} x2="5" y2={y + 5} stroke={H.belt} strokeWidth="2" />
+      <circle cx="0" cy={y - 10} r="5" fill={H.skin} stroke={H.outline} strokeWidth="2" />
+      <ellipse cx="0" cy={y - 13} rx="8" ry="5" fill={H.cap} stroke={H.outline} strokeWidth="2" />
+      <rect x="1" y={y - 12} width="9" height="3" rx="1" fill={H.brim} />
+      <circle cx="4" cy={y - 12} r="2.2" fill={H.star} />
+      <line x1="-4" y1={y + 9} x2="-4" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <line x1="4" y1={y + 9} x2="4" y2={y + 17} stroke={H.leg} strokeWidth="3" />
+      <g transform={`translate(4 ${y - 1})`}>
+        <rect x="0" y="-3" width="14" height="6" rx="2" fill={wood} />
+        <rect x="13" y="-2" width="12" height="4" rx="1.5" fill={metal} />
+        <rect x="23" y="-1.5" width="8" height="3" rx="1" fill={metal} opacity="0.92" />
+        <rect x="8" y="-7" width="10" height="4" rx="1.5" fill={scope} opacity="0.95" />
+        <circle cx="13" cy="-5" r="2.2" fill="#1a2030" stroke={metal} strokeWidth="1" />
+        <line x1="6" y1="-4" x2="6" y2="2" stroke={metal} strokeWidth="1.2" opacity="0.7" />
+      </g>
+    </g>
+  );
+}
+
+/** 按图鉴主角键渲染对应立绘 */
+function spriteForHeroPortrait(
+  kind: CodexHeroPortraitKind,
+  palette: PlayerVectorPalette,
+  gunWood: number,
+  gunMetal: number,
+): JSX.Element {
+  switch (kind) {
+    case 'hero_guerrilla':
+      return <SpriteHeroGuerrilla palette={palette} gunWood={gunWood} gunMetal={gunMetal} />;
+    case 'hero_yan_shuangying':
+      return <SpriteHeroYanShuangying palette={palette} gunWood={gunWood} gunMetal={gunMetal} />;
+    case 'hero_dadao_leader':
+      return <SpriteHeroDadaoLeader palette={palette} />;
+    case 'hero_sharpshooter':
+      return <SpriteHeroSharpshooter palette={palette} gunWood={gunWood} gunMetal={gunMetal} />;
+  }
 }
 
 /** 步兵 idle（`bodyY = -4`） */
@@ -279,6 +446,66 @@ function SpriteGunship({ fill, stroke }: { fill: string; stroke: string }): JSX.
   );
 }
 
+function SpriteMotorScout({ fill, stroke }: { fill: string; stroke: string }): JSX.Element {
+  const y = -4;
+  const cy = 3;
+  const g = gunDark(parseInt(fill.slice(1), 16));
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="-7" cy={cy + 6} r="4" fill="#1a1814" />
+      <circle cx="7" cy={cy + 6} r="4" fill="#1a1814" />
+      <rect x="-10" y={cy - 2} width="20" height="6" rx="2" fill={g} stroke={stroke} strokeWidth="1.5" />
+      <ellipse cx="0" cy={y - 1} rx="7" ry="9" fill={fill} stroke={stroke} strokeWidth="2" />
+      <circle cx="0" cy={y - 11} r="5" fill={fill} stroke={stroke} strokeWidth="2" />
+      <rect x="5" y={y - 5} width="12" height="3" rx="1" fill={g} />
+    </g>
+  );
+}
+
+function SpriteMilitaryPolice({ fill, stroke }: { fill: string; stroke: string }): JSX.Element {
+  const y = -4;
+  const g = gunDark(parseInt(fill.slice(1), 16));
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="0" cy={y} rx="9" ry="11" fill={fill} stroke={stroke} strokeWidth="2" />
+      <rect x="-5" y={y + 1} width="5" height="3" rx="1" fill="#8a2828" opacity="0.95" />
+      <circle cx="0" cy={y - 12} r="6" fill={fill} stroke={stroke} strokeWidth="2" />
+      <rect x="4" y={y - 2} width="11" height="4" rx="1" fill={g} />
+      <line x1="-4" y1={y + 9} x2="-4" y2={y + 17} stroke={stroke} strokeWidth="3" />
+      <line x1="4" y1={y + 9} x2="4" y2={y + 17} stroke={stroke} strokeWidth="3" />
+    </g>
+  );
+}
+
+function SpriteMortarTeam({ fill, stroke }: { fill: string; stroke: string }): JSX.Element {
+  const y = -4;
+  const tube = gunDark(parseInt(fill.slice(1), 16));
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <rect x="-9" y={y + 8} width="18" height="4" rx="1" fill="#3a3530" opacity="0.92" />
+      <ellipse cx="0" cy={y} rx="10" ry="11" fill={fill} stroke={stroke} strokeWidth="2" />
+      <circle cx="0" cy={y - 12} r="5.5" fill={fill} stroke={stroke} strokeWidth="2" />
+      <rect x="2" y={y - 10} width="4" height="12" rx="3" fill={tube} />
+      <line x1="-4" y1={y + 9} x2="-4" y2={y + 16} stroke={stroke} strokeWidth="3" />
+      <line x1="4" y1={y + 9} x2="4" y2={y + 16} stroke={stroke} strokeWidth="3" />
+    </g>
+  );
+}
+
+function SpriteLightTank({ fill, stroke }: { fill: string; stroke: string }): JSX.Element {
+  const cy = -1;
+  const g = gunDark(parseInt(fill.slice(1), 16));
+  return (
+    <g strokeLinecap="round" strokeLinejoin="round">
+      <rect x="-18" y={cy - 5} width="36" height="14" rx="4" fill={fill} stroke={stroke} strokeWidth="2" />
+      <circle cx="-12" cy={cy + 8} r="3" fill="#1a1814" />
+      <circle cx="12" cy={cy + 8} r="3" fill="#1a1814" />
+      <circle cx="0" cy={cy - 2} r="5" fill={g} stroke={stroke} strokeWidth="1.5" />
+      <rect x="-3" y={cy - 9} width="10" height="15" rx="2" fill={g} />
+    </g>
+  );
+}
+
 function SpriteParatrooper({ fill, stroke }: { fill: string; stroke: string }): JSX.Element {
   const y = -4;
   const g = gunDark(parseInt(fill.slice(1), 16));
@@ -330,6 +557,14 @@ function spriteEnemy(kind: EnemyKind, fill: string, stroke: string): JSX.Element
       return <SpriteGunship fill={fill} stroke={stroke} />;
     case 'paratrooper':
       return <SpriteParatrooper fill={fill} stroke={stroke} />;
+    case 'motor_scout':
+      return <SpriteMotorScout fill={fill} stroke={stroke} />;
+    case 'military_police':
+      return <SpriteMilitaryPolice fill={fill} stroke={stroke} />;
+    case 'mortar_team':
+      return <SpriteMortarTeam fill={fill} stroke={stroke} />;
+    case 'light_tank':
+      return <SpriteLightTank fill={fill} stroke={stroke} />;
     default:
       return <SpriteInfantry fill={fill} stroke={stroke} />;
   }
@@ -337,16 +572,35 @@ function spriteEnemy(kind: EnemyKind, fill: string, stroke: string): JSX.Element
 
 /**
  * 图鉴用矢量立绘：坐标与局内 `playerWorldVisual` / `enemyWorldVisual` idle 对齐，便于日后换皮一致
- * @param kind - `hero` 或敌兵种类
+ * @param kind - `hero_guerrilla` / `hero_yan_shuangying` / `hero_dadao_leader` / `hero_sharpshooter` 或敌兵种类
  * @param className - 外层 `svg` 的语义化尺寸类（如 `codex-sprite`）
+ * @param heroPalette - 游击队员造型配色（与商店「造型配色」、局内一致）；省略则用默认灰蓝
+ * @param gunWood - 枪木色（与商店枪皮一致）
+ * @param gunMetal - 枪金属色
  */
-export function CodexUnitSprite({ kind, className = '' }: { kind: CodexPortraitKind; className?: string }): JSX.Element {
-  const inner =
-    kind === 'hero' ? (
-      <SpriteHero />
-    ) : (
-      spriteEnemy(kind, hx(enemyKindFill(kind)), hx(enemyKindStroke(kind)))
-    );
+export function CodexUnitSprite({
+  kind,
+  className = '',
+  heroPalette,
+  gunWood,
+  gunMetal,
+}: {
+  kind: CodexPortraitKind;
+  className?: string;
+  heroPalette?: PlayerVectorPalette;
+  gunWood?: number;
+  gunMetal?: number;
+}): JSX.Element {
+  const inner = isCodexHeroPortraitKind(kind) ? (
+    spriteForHeroPortrait(
+      kind,
+      heroPalette ?? DEFAULT_PLAYER_VECTOR_PALETTE,
+      gunWood ?? 0x4a3528,
+      gunMetal ?? 0x2c3238,
+    )
+  ) : (
+    spriteEnemy(kind, hx(enemyKindFill(kind)), hx(enemyKindStroke(kind)))
+  );
 
   return (
     <svg

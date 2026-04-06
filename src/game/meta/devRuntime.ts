@@ -3,7 +3,7 @@
  */
 
 /** 可循环切换的局内逻辑时间倍率（与 `GameScreen` 的 dt 乘子一致） */
-export const DEV_TIME_SCALES = [1, 2, 4, 8] as const;
+export const DEV_TIME_SCALES = [1, 2, 3] as const;
 
 /** 合法时间倍率字面量类型 */
 export type DevTimeScale = (typeof DEV_TIME_SCALES)[number];
@@ -19,7 +19,7 @@ export function getDevTimeScale(): DevTimeScale {
   return DEV_TIME_SCALES[_timeScaleIdx]!;
 }
 
-/** 按 1→2→4→8→1 循环并返回新倍率 */
+/** 按 1→2→3→1 循环并返回新倍率 */
 export function cycleDevTimeScale(): DevTimeScale {
   _timeScaleIdx = (_timeScaleIdx + 1) % DEV_TIME_SCALES.length;
   return getDevTimeScale();

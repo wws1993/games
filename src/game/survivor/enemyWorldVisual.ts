@@ -165,6 +165,34 @@ function sampleEnemyMotion(kind: EnemyKind, phase: number, moving: boolean): Ene
       z.legR = -leg;
       break;
     }
+    case 'motor_scout': {
+      z.bob = s(phase * 2.2) * 1.85;
+      z.swayX = s(phase * 1.55) * 1.2;
+      const leg = s(phase * 1.2) * 3.1;
+      z.legL = leg;
+      z.legR = -leg;
+      break;
+    }
+    case 'military_police': {
+      z.bob = s(phase * 1.35) * 1.5;
+      const leg = s(phase * 0.92) * 2.65;
+      z.legL = leg;
+      z.legR = -leg;
+      break;
+    }
+    case 'mortar_team': {
+      z.bob = s(phase * 0.78) * 1.6;
+      z.swayX = c(phase * 0.58) * 1.2;
+      const w = s(phase * 0.72) * 3;
+      z.legL = w;
+      z.legR = -w;
+      break;
+    }
+    case 'light_tank': {
+      z.bob = s(phase * 3.2) * 1.2;
+      z.swayX = s(phase * 1.9) * 0.75;
+      break;
+    }
     default: {
       const bob = s(phase * 2) * 2.1;
       const leg = s(phase) * 3.4;
@@ -276,6 +304,18 @@ export class EnemyWorldVisual {
         break;
       case 'paratrooper':
         this._drawParatrooper(g, bodyY, fill, stroke, m);
+        break;
+      case 'motor_scout':
+        this._drawMotorScout(g, bodyY, fill, stroke, m);
+        break;
+      case 'military_police':
+        this._drawMilitaryPolice(g, bodyY, fill, stroke, m);
+        break;
+      case 'mortar_team':
+        this._drawMortarTeam(g, bodyY, fill, stroke, m);
+        break;
+      case 'light_tank':
+        this._drawLightTank(g, bodyY, fill, stroke, m);
         break;
       default:
         this._drawInfantry(g, bodyY, fill, stroke, m);
@@ -731,6 +771,102 @@ export class EnemyWorldVisual {
       .lineTo(3 + ox + m.legR * 0.75, bodyY + 15)
       .stroke({ width: 2.5, color: stroke });
   }
+
+  /** 摩托侦察：双轮 + 骑手 + 短枪 */
+  private _drawMotorScout(
+    g: Graphics,
+    bodyY: number,
+    fill: number,
+    stroke: number,
+    m: EnemyMotionSample,
+  ): void {
+    const cy = bodyY + 4;
+    const gunC = ((fill & 0xfefefe) >> 1) | 0x080808;
+    g.circle(-7, cy + 6, 4).fill({ color: 0x1a1814 });
+    g.circle(7, cy + 6, 4).fill({ color: 0x1a1814 });
+    g.roundRect(-10 + m.swayX * 0.15, cy - 2, 20, 6, 2)
+      .fill({ color: gunC })
+      .stroke({ width: 1.5, color: stroke });
+    const ry = bodyY - 5 + m.bob * 0.15;
+    g.ellipse(m.swayX * 0.2, ry, 7, 9)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    g.circle(m.swayX * 0.2, ry - 11, 5)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    g.roundRect(5 + m.swayX * 0.2, ry - 4, 12, 3, 1).fill({ color: gunC });
+  }
+
+  /** 宪兵：步兵轮廓 + 红臂章 + 短枪 */
+  private _drawMilitaryPolice(
+    g: Graphics,
+    bodyY: number,
+    fill: number,
+    stroke: number,
+    m: EnemyMotionSample,
+  ): void {
+    g.ellipse(0, bodyY, 9, 11)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    g.roundRect(-5, bodyY + 1, 5, 3, 1).fill({ color: 0x8a2828, alpha: 0.95 });
+    g.circle(0, bodyY - 12, 6)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    const gunC = ((fill & 0xfefefe) >> 1) | 0x080808;
+    g.roundRect(4, bodyY - 2, 11, 4, 1).fill({ color: gunC });
+    g.moveTo(-4, bodyY + 9)
+      .lineTo(-4 + m.legL * 0.88, bodyY + 17)
+      .stroke({ width: 3, color: stroke });
+    g.moveTo(4, bodyY + 9)
+      .lineTo(4 + m.legR * 0.88, bodyY + 17)
+      .stroke({ width: 3, color: stroke });
+  }
+
+  /** 迫击炮组：座钣 + 尾管 + 短身 */
+  private _drawMortarTeam(
+    g: Graphics,
+    bodyY: number,
+    fill: number,
+    stroke: number,
+    m: EnemyMotionSample,
+  ): void {
+    const ox = m.swayX;
+    g.roundRect(-9 + ox, bodyY + 4, 18, 4, 1).fill({ color: 0x3a3530, alpha: 0.92 });
+    g.ellipse(ox, bodyY, 10, 11)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    g.circle(ox, bodyY - 12, 5.5)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    const tube = ((fill & 0xfefefe) >> 1) | 0x080808;
+    g.roundRect(2 + ox, bodyY - 10, 4, 12, 3).fill({ color: tube });
+    g.moveTo(-4 + ox, bodyY + 9)
+      .lineTo(-4 + ox + m.legL * 0.88, bodyY + 16)
+      .stroke({ width: 3, color: stroke });
+    g.moveTo(4 + ox, bodyY + 9)
+      .lineTo(4 + ox + m.legR * 0.88, bodyY + 16)
+      .stroke({ width: 3, color: stroke });
+  }
+
+  /** 轻型坦克：宽车体 + 履带 + 炮塔 */
+  private _drawLightTank(
+    g: Graphics,
+    bodyY: number,
+    fill: number,
+    stroke: number,
+    m: EnemyMotionSample,
+  ): void {
+    const cy = bodyY + 3;
+    const gunC = ((fill & 0xfefefe) >> 1) | 0x080808;
+    g.roundRect(-18, cy - 5, 36, 14, 4)
+      .fill({ color: fill })
+      .stroke({ width: 2, color: stroke });
+    g.circle(-12, cy + 8 + m.bob * 0.12, 3).fill({ color: 0x1a1814 });
+    g.circle(12, cy + 8 + m.bob * 0.12, 3).fill({ color: 0x1a1814 });
+    const tx = m.swayX * 0.25;
+    g.circle(tx, cy - 2, 5).fill({ color: gunC }).stroke({ width: 1.5, color: stroke });
+    g.roundRect(-3 + tx, cy - 9, 10, 15, 2).fill({ color: gunC });
+  }
 }
 
 /** 供 `GameScreen` 与视觉层共用的兵种主色：陆空分队、色相错开便于辨认 */
@@ -770,6 +906,14 @@ export function enemyKindFill(kind: EnemyKind): number {
       return 0x4a6868;
     case 'paratrooper':
       return 0x6b7a90;
+    case 'motor_scout':
+      return 0x5a5448;
+    case 'military_police':
+      return 0x4a3538;
+    case 'mortar_team':
+      return 0x5c5040;
+    case 'light_tank':
+      return 0x3a4038;
     default:
       return 0x5a6b48;
   }
@@ -791,6 +935,8 @@ export function enemyKindStroke(kind: EnemyKind): number {
       return 0x3a4550;
     case 'scout_car':
       return 0x2a3848;
+    case 'light_tank':
+      return 0x2a3028;
     default:
       return 0x243220;
   }

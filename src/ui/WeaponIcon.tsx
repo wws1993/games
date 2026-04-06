@@ -219,5 +219,38 @@ function weaponGlyph(kind: PlayerWeaponKind, A: string): JSX.Element {
           <circle cx="-6" cy="0" r="1" fill={A} stroke="none" />
         </g>
       );
+    case 'dao_broadsword':
+      return (
+        <g transform="translate(16,17)">
+          <path d="M-2-8 L4 6" stroke={M} strokeWidth="2.4" />
+          <path d="M-6 4 L6 6" stroke={W} strokeWidth="1.8" />
+          <path d="M4 6 L7 8" stroke={W} />
+        </g>
+      );
+    case 'spear_red_tassel':
+      return (
+        <g transform="translate(16,17)">
+          <path d="M0-9 L0 8" stroke={M} strokeWidth="1.6" />
+          <path d="M-3 5 L3 5" stroke={A} strokeWidth="2" />
+          <path d="M-1-7 L1-7" stroke={W} />
+        </g>
+      );
+    case 'bayonet_spike':
+      return (
+        <g transform="translate(16,17)">
+          <path d="M-10 0h12" stroke={W} strokeWidth="1.6" />
+          <path d="M2-2 L8 0 L2 2" stroke={M} fill="none" />
+          <path d="M-11-1.5v3" stroke={D} />
+        </g>
+      );
+    default: {
+      return (
+        <g transform="translate(16,17)">
+          <path d="M-10 0h16" stroke={W} strokeWidth="2" />
+          <path d="M6-1h6v2h-6" stroke={M} />
+          <circle cx="-7" cy="0" r="1.1" fill={A} stroke="none" />
+        </g>
+      );
+    }
   }
 }

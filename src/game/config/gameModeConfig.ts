@@ -27,6 +27,10 @@ const GROUND_MULT: Partial<Record<EnemyKind, number>> = {
   mg: 1.22,
   artillery: 1.12,
   scout_car: 1.25,
+  motor_scout: 1.3,
+  military_police: 1.24,
+  mortar_team: 1.18,
+  light_tank: 1.15,
   officer: 1.0,
   recon_plane: 0.48,
   fighter_plane: 0.52,
@@ -53,10 +57,14 @@ const AIR_MULT: Partial<Record<EnemyKind, number>> = {
   mg: 0.9,
   artillery: 0.95,
   scout_car: 0.88,
+  motor_scout: 0.86,
+  military_police: 0.9,
+  mortar_team: 0.92,
+  light_tank: 0.9,
   officer: 0.95,
 };
 
-/** 三种模式定义（供首页与图鉴引用） */
+/** 三种模式定义（供首页引用） */
 export const GAME_MODE_DEFS: readonly GameModeDef[] = [
   {
     id: 'standard',

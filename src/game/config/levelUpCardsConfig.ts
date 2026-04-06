@@ -1,6 +1,13 @@
 /**
- * 升级强化卡：模板 + 按当前角色等级实例化数值；乘性卡用「百分比增量」缩放，避免早期爆炸、后期仍有成长
- * 优化更新：新增20+种效果类型，扩展至50张强化卡，丰富玩法多样性
+ * 升级强化卡：模板池按「火力 / 生存 / 机动 / 成长」方向划分；`materializeLevelUpCard` 按等级实例化数值。
+ * 乘性卡用百分比增量缩放；暴击率仍由运气（luckMult）等换算，无单独暴击率卡；溢出暴击转攻见 `SurvivorGameModel`。
+ *
+ * 强化分类与抽池（`levelUpTemplateEligibleForWeaponCategory`）：
+ * - **基础能力增强** `base`：移速、全局伤害、生命、护甲、经验、幸运、拾取、闪避、吸血、复活、荆棘、击退、回复、冲刺、歼敌补给、低血、暴击锤炼等；不含仅弹体/仅近战独占条目。
+ * - **主武器数值（射击与近战共用）** `sharedWeapon`：`rifleAttackSpeedMult`、`rifleBulletCount`、`rifleDamageMult`、`projectilePierceAdd`（局内近战吃射速/散射/主武器伤；穿透仅影响弹体 `hitsRemaining`，近战挥击扇区内对每名敌人各结算一次，不受穿透数值限制）。
+ * - **远程武器增强** `rangedWeapon`：仅 `projectileBounceAdd`、`rifleBulletSpeedMult`、`rifleReloadSpeedMult`（近战无弹体/无换弹读条，不进近战池）。
+ * - **近战武器增强** `meleeWeapon`：当前无独占 `variant`；预留 `levelUpTemplateMeleeWeaponOnly` 未来仅近战池。
+ * 近战与远程池不通用：近战局剔除 `rangedWeapon`；射击局剔除 `meleeWeapon`（当前恒假）。
  */
 
 /** 单张卡片如何改局内属性（由 `SurvivorGameModel.applyLevelUpChoice` 应用） */
@@ -10,8 +17,6 @@ export type LevelUpCardEffect =
   | { kind: 'maxHp'; add: number }
   | { kind: 'rifleAttackSpeedMult'; factor: number }
   | { kind: 'rifleBulletCount'; add: number }
-  /** 步枪暴击几率增量（0.1 = +10%），局内累加后封顶 100% */
-  | { kind: 'critChanceAdd'; add: number }
   /** 暴击命中时再乘此系数，多张可叠乘 */
   | { kind: 'critOnHitDamageMult'; factor: number }
   /** 获得后可推动矩形土房障碍 */
@@ -20,7 +25,8 @@ export type LevelUpCardEffect =
   | { kind: 'armorAdd'; add: number } // 护甲，减少受到的伤害
   | { kind: 'expMult'; factor: number } // 经验获取倍率
   | { kind: 'coinMult'; factor: number } // 配置称金币，局内叠乘幸运（与幸运卡一致）
-  | { kind: 'luckMult'; factor: number } // 运气倍率，影响掉率/暴击等
+  /** 运气倍率：叠乘后局内换算暴击率（见 `luckCritChanceBonusFromLuckMult`）并影响掉率等 */
+  | { kind: 'luckMult'; factor: number }
   | { kind: 'pickupRangeMult'; factor: number } // 拾取范围倍率
   | { kind: 'lifestealAdd'; add: number } // 吸血率，攻击回复伤害的百分比
   | { kind: 'dodgeChanceAdd'; add: number } // 闪避率，概率躲避伤害
@@ -34,7 +40,6 @@ export type LevelUpCardEffect =
   | { kind: 'dashCooldownMult'; factor: number } // 冲刺冷却倍率
   | { kind: 'projectileBounceAdd'; add: number } // 投射物反弹次数
   | { kind: 'rifleDamageMult'; factor: number } // 步枪专属伤害倍率
-  | { kind: 'rifleCritChanceAdd'; add: number } // 步枪专属暴击率
   | { kind: 'rifleReloadSpeedMult'; factor: number } // 步枪换弹速度倍率
   | { kind: 'dashSpeedMult'; factor: number } // 冲刺移速倍率
   | { kind: 'hurtInvincibleMult'; factor: number } // 受伤无敌时间倍率
@@ -213,13 +218,6 @@ export type LevelUpCardTemplate =
       id: string;
       tier: LevelUpCardTier;
       title: string;
-      variant: 'critChanceAdd';
-      scale: LevelUpScaleCritAddSpec;
-    }
-  | {
-      id: string;
-      tier: LevelUpCardTier;
-      title: string;
       variant: 'critOnHitDamageMult';
       scale: LevelUpScaleMultSpec;
     }
@@ -354,13 +352,6 @@ export type LevelUpCardTemplate =
       id: string;
       tier: LevelUpCardTier;
       title: string;
-      variant: 'rifleCritChanceAdd';
-      scale: LevelUpScaleCritAddSpec;
-    }
-  | {
-      id: string;
-      tier: LevelUpCardTier;
-      title: string;
       variant: 'rifleReloadSpeedMult';
       scale: LevelUpScaleMultSpec;
     }
@@ -396,409 +387,468 @@ export type LevelUpCardTemplate =
 /** 每次升级可选张数 */
 export const levelUpPickCount = 3;
 
-/** 「推箱子」卡 id；获得后本局从池剔除 */
+/** 「推障碍」卡 id；获得后本局从池剔除（id 固定供 `SurvivorGameModel` 过滤） */
 export const LEVEL_UP_PUSH_CARD_ID = 'card_push_box';
 /** 「复活」卡 id；获得后本局从池剔除 */
 export const LEVEL_UP_REVIVE_CARD_ID = 'card_revive';
 
-/** 强化卡模板池（抽取后由 `materializeLevelUpCard` 按等级生成实例） */
+/** 强化卡模板池：方向覆盖火力 / 生存 / 机动 / 成长；抽取后由 `materializeLevelUpCard` 按等级生成实例 */
 export const levelUpCardTemplates: readonly LevelUpCardTemplate[] = [
-  // ========== 原有保留卡片 ==========
+  // —— E：基础成长 ——
   {
-    id: 'card_move',
+    id: 'lu_e_mobility',
     tier: 'E',
-    title: '我建议滑着走',
+    title: '轻装机动',
     variant: 'moveSpeedMult',
     scale: { basePct: 0.02, pctPerLevel: 0.0011, minPct: 0.012, maxPct: 0.092 },
   },
   {
-    id: 'card_hp',
-    tier: 'D',
-    title: '加强体质锻炼，增强人民体质',
+    id: 'lu_e_vitality',
+    tier: 'E',
+    title: '体质强化',
     variant: 'maxHp',
-    scale: { base: 6, perLevel: 1.12, min: 5, max: 44 },
+    scale: { base: 5, perLevel: 0.95, min: 4, max: 36 },
   },
   {
-    id: 'card_damage',
-    tier: 'C',
-    title: '我这一枪怕是有点痛哦',
-    variant: 'damageMult',
-    scale: { basePct: 0.026, pctPerLevel: 0.00155, minPct: 0.018, maxPct: 0.105 },
-  },
-  {
-    id: 'card_rifle_rof',
-    tier: 'B',
-    title: '射！射！射！',
-    variant: 'rifleAttackSpeedMult',
-    scale: { basePct: 0.024, pctPerLevel: 0.00145, minPct: 0.016, maxPct: 0.098 },
-  },
-  {
-    id: LEVEL_UP_PUSH_CARD_ID,
-    tier: 'B',
-    title: '推箱子',
-    variant: 'pushObstacles',
-    description: '贴住土房后同方向持续用力约 1 秒，再缓慢推动障碍（获得后本局不再出现）',
-  },
-  {
-    id: 'card_rifle_split',
-    tier: 'A',
-    title: '喜欢玩雷电战机吗',
-    variant: 'rifleBulletCount',
-    scale: { baseAdd: 1, everyLevels: 11, maxBonus: 2 },
-  },
-  {
-    id: 'card_crit_1',
+    id: 'lu_e_armor',
     tier: 'E',
-    title: '暴击·稳固',
-    variant: 'critChanceAdd',
-    scale: { base: 0.04, perLevel: 0.0026, max: 0.11 },
-  },
-  {
-    id: 'card_crit_keen',
-    tier: 'C',
-    title: '暴击·敏锐',
-    variant: 'critChanceAdd',
-    scale: { base: 0.078, perLevel: 0.004, max: 0.19 },
-  },
-  {
-    id: 'card_crit_whip',
-    tier: 'S',
-    title: '皮鞭蘸碘伏，边打边消毒',
-    variant: 'critOnHitDamageMult',
-    scale: { basePct: 0.052, pctPerLevel: 0.0032, minPct: 0.04, maxPct: 0.2 },
-  },
-
-  // ========== E级 基础卡 ==========
-  {
-    id: 'card_armor_e',
-    tier: 'E',
-    title: '挨揍练抗揍',
+    title: '土工作业',
     variant: 'armorAdd',
     scale: { base: 1, perLevel: 0.1, min: 1, max: 5 },
   },
   {
-    id: 'card_exp_e',
+    id: 'lu_e_xp',
     tier: 'E',
-    title: '卷，都给我卷',
+    title: '战场总结',
     variant: 'expMult',
     scale: { basePct: 0.02, pctPerLevel: 0.001, minPct: 0.012, maxPct: 0.08 },
   },
   {
-    id: 'card_luck_e',
+    id: 'lu_e_fortune',
     tier: 'E',
-    title: '今天运气不错',
+    title: '战场机缘',
     variant: 'luckMult',
     scale: { basePct: 0.02, pctPerLevel: 0.001, minPct: 0.012, maxPct: 0.08 },
   },
   {
-    id: 'card_pickup_e',
+    id: 'lu_e_pickup',
     tier: 'E',
-    title: '伸手就能拿到',
+    title: '近距拾取',
     variant: 'pickupRangeMult',
     scale: { basePct: 0.03, pctPerLevel: 0.0012, minPct: 0.02, maxPct: 0.1 },
   },
   {
-    id: 'card_rifle_dmg_e',
+    id: 'lu_e_primary_dmg',
     tier: 'E',
-    title: '步枪加加威力',
+    title: '主武器整备',
     variant: 'rifleDamageMult',
     scale: { basePct: 0.03, pctPerLevel: 0.0015, minPct: 0.02, maxPct: 0.12 },
   },
-
-  // ========== D级 普通卡 ==========
   {
-    id: 'card_dodge_d',
+    id: 'lu_e_strike',
+    tier: 'E',
+    title: '出力稳定',
+    variant: 'damageMult',
+    scale: { basePct: 0.018, pctPerLevel: 0.001, minPct: 0.012, maxPct: 0.07 },
+  },
+
+  // —— D：生存与资源 ——
+  {
+    id: 'lu_d_hp',
     tier: 'D',
-    title: '走位，走位',
+    title: '耐力训练',
+    variant: 'maxHp',
+    scale: { base: 6, perLevel: 1.12, min: 5, max: 44 },
+  },
+  {
+    id: 'lu_d_dodge',
+    tier: 'D',
+    title: '侧步规避',
     variant: 'dodgeChanceAdd',
     scale: { base: 0.02, perLevel: 0.0015, max: 0.08 },
   },
   {
-    id: 'card_coin_d',
+    id: 'lu_d_coin',
     tier: 'D',
-    title: '见钱眼开',
+    title: '缴获加成',
     variant: 'coinMult',
     scale: { basePct: 0.04, pctPerLevel: 0.002, minPct: 0.03, maxPct: 0.15 },
   },
   {
-    id: 'card_lifesteal_d',
+    id: 'lu_d_lifesteal',
     tier: 'D',
-    title: '小吸一口',
+    title: '战地包扎',
     variant: 'lifestealAdd',
     scale: { base: 0.015, perLevel: 0.001, max: 0.06 },
   },
   {
-    id: 'card_regen_d',
+    id: 'lu_d_regen',
     tier: 'D',
-    title: '慢慢回血',
+    title: '持续愈合',
     variant: 'regenAdd',
-    scale: { base: 0.2, perLevel: 0.03, min: 0.15, max: 1.2 },
+    scale: { base: 0.1, perLevel: 0.018, min: 0.08, max: 0.52 },
   },
   {
-    id: 'card_rifle_crit_d',
+    id: 'lu_d_dash_spd',
     tier: 'D',
-    title: '步枪好暴击',
-    variant: 'rifleCritChanceAdd',
-    scale: { base: 0.05, perLevel: 0.003, max: 0.15 },
-  },
-  {
-    id: 'card_dash_speed_d',
-    tier: 'D',
-    title: '冲刺快一点',
+    title: '突击步幅',
     variant: 'dashSpeedMult',
     scale: { basePct: 0.04, pctPerLevel: 0.002, minPct: 0.03, maxPct: 0.14 },
   },
 
-  // ========== C级 优秀卡 ==========
+  // —— C：对抗与控场 ——
   {
-    id: 'card_armor_c',
+    id: 'lu_c_armor',
     tier: 'C',
-    title: '铁骨铮铮',
+    title: '硬壳护体',
     variant: 'armorAdd',
     scale: { base: 2, perLevel: 0.15, min: 1.5, max: 8 },
   },
   {
-    id: 'card_thorns_c',
+    id: 'lu_c_thorns',
     tier: 'C',
-    title: '扎死你个小的',
+    title: '荆棘回击',
     variant: 'thornsDamageMult',
     scale: { basePct: 0.05, pctPerLevel: 0.0025, minPct: 0.04, maxPct: 0.18 },
   },
   {
-    id: 'card_pierce_c',
+    id: 'lu_c_pierce',
     tier: 'C',
-    title: '一枪穿一串',
+    title: '贯穿射击',
     variant: 'projectilePierceAdd',
     scale: { base: 1, perLevel: 0.05, min: 1, max: 3 },
   },
   {
-    id: 'card_knockback_c',
+    id: 'lu_c_knockback',
     tier: 'C',
-    title: '别过来！',
+    title: '冲击退敌',
     variant: 'knockbackMult',
     scale: { basePct: 0.06, pctPerLevel: 0.003, minPct: 0.05, maxPct: 0.22 },
   },
   {
-    id: 'card_rifle_dmg_c',
+    id: 'lu_c_primary_dmg',
     tier: 'C',
-    title: '步枪要威力',
+    title: '主武器增压',
     variant: 'rifleDamageMult',
     scale: { basePct: 0.05, pctPerLevel: 0.0025, minPct: 0.04, maxPct: 0.2 },
   },
   {
-    id: 'card_invincible_c',
+    id: 'lu_c_invuln',
     tier: 'C',
-    title: '无敌久一点',
+    title: '受击喘息',
     variant: 'hurtInvincibleMult',
     scale: { basePct: 0.05, pctPerLevel: 0.0025, minPct: 0.04, maxPct: 0.18 },
   },
-
-  // ========== B级 精良卡 ==========
   {
-    id: 'card_kill_heal_b',
+    id: 'lu_c_global_dmg',
+    tier: 'C',
+    title: '火力上调',
+    variant: 'damageMult',
+    scale: { basePct: 0.026, pctPerLevel: 0.00155, minPct: 0.018, maxPct: 0.105 },
+  },
+
+  // —— B：武器机制与机动 ——
+  {
+    id: LEVEL_UP_PUSH_CARD_ID,
     tier: 'B',
-    title: '杀一个回一口',
-    variant: 'killHealAdd',
-    scale: { base: 2, perLevel: 0.12, min: 1.5, max: 7 },
+    title: '推移障碍',
+    variant: 'pushObstacles',
+    description: '贴住土房后同方向持续施力约 1 秒，可缓慢推动矩形障碍（获得后本局不再出现）',
   },
   {
-    id: 'card_bullet_speed_b',
+    id: 'lu_b_kill_mend',
     tier: 'B',
-    title: '子弹飞快点',
+    title: '歼敌补给',
+    variant: 'killHealAdd',
+    scale: { base: 1.1, perLevel: 0.07, min: 0.9, max: 3.5 },
+  },
+  {
+    id: 'lu_b_proj_spd',
+    tier: 'B',
+    title: '弹体加速',
     variant: 'rifleBulletSpeedMult',
     scale: { basePct: 0.05, pctPerLevel: 0.0025, minPct: 0.04, maxPct: 0.18 },
   },
   {
-    id: 'card_dash_cd_b',
+    id: 'lu_b_dash_cd',
     tier: 'B',
-    title: '闪现冷却快',
+    title: '冲刺整备',
     variant: 'dashCooldownMult',
     scale: { basePct: -0.03, pctPerLevel: -0.0015, minPct: -0.1, maxPct: -0.02 },
   },
   {
-    id: 'card_bounce_b',
+    id: 'lu_b_ricochet',
     tier: 'B',
-    title: '弹弹弹',
+    title: '跳弹折射',
     variant: 'projectileBounceAdd',
     scale: { base: 1, perLevel: 0.04, min: 1, max: 3 },
   },
   {
-    id: 'card_rifle_reload_b',
+    id: 'lu_b_reload',
     tier: 'B',
-    title: '换弹不磨蹭',
+    title: '快速装填',
     variant: 'rifleReloadSpeedMult',
     scale: { basePct: 0.04, pctPerLevel: 0.002, minPct: 0.03, maxPct: 0.15 },
   },
   {
-    id: 'card_exp_b',
+    id: 'lu_b_rof',
     tier: 'B',
-    title: '升级快一点',
+    title: '压制射速',
+    variant: 'rifleAttackSpeedMult',
+    scale: { basePct: 0.024, pctPerLevel: 0.00145, minPct: 0.016, maxPct: 0.098 },
+  },
+  {
+    id: 'lu_b_xp',
+    tier: 'B',
+    title: '经验压缩',
     variant: 'expMult',
     scale: { basePct: 0.04, pctPerLevel: 0.002, minPct: 0.03, maxPct: 0.14 },
   },
 
-  // ========== A级 稀有卡 ==========
+  // —— A：稀有专精 ——
   {
-    id: 'card_exp_a',
+    id: 'lu_a_salvo',
     tier: 'A',
-    title: '卷王之王',
+    title: '密集弹幕',
+    variant: 'rifleBulletCount',
+    scale: { baseAdd: 1, everyLevels: 11, maxBonus: 2 },
+  },
+  {
+    id: 'lu_a_xp',
+    tier: 'A',
+    title: '战例复盘',
     variant: 'expMult',
     scale: { basePct: 0.05, pctPerLevel: 0.003, minPct: 0.04, maxPct: 0.2 },
   },
   {
-    id: 'card_luck_a',
+    id: 'lu_a_fortune',
     tier: 'A',
-    title: '欧皇附体',
+    title: '天时地利',
     variant: 'luckMult',
     scale: { basePct: 0.06, pctPerLevel: 0.0035, minPct: 0.05, maxPct: 0.22 },
   },
   {
-    id: 'card_lifesteal_a',
+    id: 'lu_a_siphon',
     tier: 'A',
-    title: '吸血鬼竟是我自己',
+    title: '深层吸血',
     variant: 'lifestealAdd',
     scale: { base: 0.04, perLevel: 0.0025, max: 0.15 },
   },
   {
-    id: 'card_dodge_a',
+    id: 'lu_a_evasion',
     tier: 'A',
-    title: '根本打不到我',
+    title: '鬼魅走位',
     variant: 'dodgeChanceAdd',
     scale: { base: 0.05, perLevel: 0.003, max: 0.18 },
   },
   {
-    id: 'card_pickup_a',
+    id: 'lu_a_magnet',
     tier: 'A',
-    title: '万有引力',
+    title: '广域拾取',
     variant: 'pickupRangeMult',
     scale: { basePct: 0.08, pctPerLevel: 0.004, minPct: 0.06, maxPct: 0.28 },
   },
   {
-    id: 'card_rifle_crit_a',
+    id: 'lu_a_crit_mend',
     tier: 'A',
-    title: '步枪枪枪暴击',
-    variant: 'rifleCritChanceAdd',
-    scale: { base: 0.08, perLevel: 0.005, max: 0.25 },
-  },
-  {
-    id: 'card_crit_lifesteal_a',
-    tier: 'A',
-    title: '暴击吸一口',
+    title: '暴击回气',
     variant: 'critLifestealAdd',
     scale: { base: 0.06, perLevel: 0.0035, max: 0.2 },
   },
 
-  // ========== S级 史诗卡 ==========
+  // —— S：史诗 ——
   {
     id: LEVEL_UP_REVIVE_CARD_ID,
     tier: 'S',
-    title: '春哥附体',
+    title: '绝处逢生',
     variant: 'revive',
-    description: '本局可复活一次，复活后恢复50%最大生命（获得后本局不再出现）',
+    description: '本局可复活一次，复活后恢复约 50% 最大生命（获得后本局不再出现）',
   },
   {
-    id: 'card_armor_s',
+    id: 'lu_s_crit_train',
     tier: 'S',
-    title: '金刚不坏',
+    title: '致命锤炼',
+    variant: 'critOnHitDamageMult',
+    scale: { basePct: 0.052, pctPerLevel: 0.0032, minPct: 0.04, maxPct: 0.2 },
+  },
+  {
+    id: 'lu_s_armor',
+    tier: 'S',
+    title: '铜墙铁壁',
     variant: 'armorAdd',
     scale: { base: 4, perLevel: 0.25, min: 3, max: 15 },
   },
   {
-    id: 'card_thorns_s',
+    id: 'lu_s_thorns',
     tier: 'S',
-    title: '刺猬成精了',
+    title: '反伤尖刺',
     variant: 'thornsDamageMult',
     scale: { basePct: 0.12, pctPerLevel: 0.006, minPct: 0.1, maxPct: 0.4 },
   },
   {
-    id: 'card_regen_s',
+    id: 'lu_s_regen',
     tier: 'S',
-    title: '血条自动修',
+    title: '战场疗养',
     variant: 'regenAdd',
-    scale: { base: 1, perLevel: 0.08, min: 0.8, max: 4 },
+    scale: { base: 0.42, perLevel: 0.042, min: 0.38, max: 1.55 },
   },
   {
-    id: 'card_coin_s',
+    id: 'lu_s_loot',
     tier: 'S',
-    title: '富得流油',
+    title: '战利丰饶',
     variant: 'coinMult',
     scale: { basePct: 0.1, pctPerLevel: 0.005, minPct: 0.08, maxPct: 0.35 },
   },
   {
-    id: 'card_rifle_dmg_s',
+    id: 'lu_s_primary_dmg',
     tier: 'S',
-    title: '一枪一个小朋友',
+    title: '主武器主宰',
     variant: 'rifleDamageMult',
     scale: { basePct: 0.08, pctPerLevel: 0.004, minPct: 0.06, maxPct: 0.35 },
   },
   {
-    id: 'card_rifle_reload_s',
+    id: 'lu_s_reload',
     tier: 'S',
-    title: '秒换弹',
+    title: '瞬时装填',
     variant: 'rifleReloadSpeedMult',
     scale: { basePct: 0.08, pctPerLevel: 0.004, minPct: 0.06, maxPct: 0.3 },
   },
 
-  // ========== SS级 传说卡 ==========
+  // —— SS：传说 ——
   {
-    id: 'card_pierce_ss',
+    id: 'lu_ss_pierce',
     tier: 'SS',
-    title: '万箭穿心',
+    title: '纵深贯穿',
     variant: 'projectilePierceAdd',
     scale: { base: 2, perLevel: 0.08, min: 1.5, max: 6 },
   },
   {
-    id: 'card_bounce_ss',
+    id: 'lu_ss_bounce',
     tier: 'SS',
-    title: '子弹弹弹乐',
+    title: '连环跳弹',
     variant: 'projectileBounceAdd',
     scale: { base: 2, perLevel: 0.07, min: 1.5, max: 5 },
   },
   {
-    id: 'card_low_hp_dmg_ss',
+    id: 'lu_ss_desperate',
     tier: 'SS',
-    title: '绝境爆发',
+    title: '绝境反击',
     variant: 'lowHpDamageMult',
     scale: { basePct: 0.15, pctPerLevel: 0.008, minPct: 0.12, maxPct: 0.5 },
   },
   {
-    id: 'card_max_hp_ss',
+    id: 'lu_ss_hp',
     tier: 'SS',
-    title: '血条厚的离谱',
+    title: '生命扩容',
     variant: 'maxHp',
     scale: { base: 12, perLevel: 1.5, min: 10, max: 70 },
   },
 
-  // ========== SSS级 神话卡 ==========
+  // —— SSS：神话 ——
   {
-    id: 'card_all_damage_sss',
+    id: 'lu_sss_overkill',
     tier: 'SSS',
-    title: '毁天灭地',
+    title: '毁伤极限',
     variant: 'damageMult',
     scale: { basePct: 0.08, pctPerLevel: 0.005, minPct: 0.06, maxPct: 0.4 },
   },
   {
-    id: 'card_max_hp_sss',
+    id: 'lu_sss_hp',
     tier: 'SSS',
-    title: '血条比你命长',
+    title: '生命洪流',
     variant: 'maxHp',
     scale: { base: 18, perLevel: 2.2, min: 15, max: 100 },
   },
   {
-    id: 'card_crit_all_sss',
+    id: 'lu_sss_crit',
     tier: 'SSS',
-    title: '枪枪暴击不是梦',
-    variant: 'critChanceAdd',
-    scale: { base: 0.15, perLevel: 0.008, max: 0.4 },
-  },
-  {
-    id: 'card_crit_dmg_sss',
-    tier: 'SSS',
-    title: '暴击秒天秒地',
+    title: '暴击终幕',
     variant: 'critOnHitDamageMult',
     scale: { basePct: 0.1, pctPerLevel: 0.006, minPct: 0.08, maxPct: 0.45 },
   },
 ];
+
+/** 设计侧分类：图鉴/策划标注；`sharedWeapon` 在射击与近战局中均会出现 */
+export type LevelUpCardDesignCategory = 'base' | 'sharedWeapon' | 'rangedWeapon' | 'meleeWeapon';
+
+/** 返回模板的设计分类（与抽池规则一致，便于 UI/图鉴展示） */
+export function levelUpTemplateDesignCategory(template: LevelUpCardTemplate): LevelUpCardDesignCategory {
+  if (levelUpTemplateRangedWeaponOnly(template)) {
+    return 'rangedWeapon';
+  }
+  if (levelUpTemplateMeleeWeaponOnly(template)) {
+    return 'meleeWeapon';
+  }
+  switch (template.variant) {
+    case 'rifleAttackSpeedMult':
+    case 'rifleBulletCount':
+    case 'rifleDamageMult':
+    case 'projectilePierceAdd':
+      return 'sharedWeapon';
+    default:
+      return 'base';
+  }
+}
+
+/** 仅远程武器池：弹体跳弹、弹速、换弹（近战局内无对应效果） */
+export function levelUpTemplateRangedWeaponOnly(template: LevelUpCardTemplate): boolean {
+  return (
+    template.variant === 'projectileBounceAdd' ||
+    template.variant === 'rifleBulletSpeedMult' ||
+    template.variant === 'rifleReloadSpeedMult'
+  );
+}
+
+/** 仅近战武器池：独占 variant 出现时返回 true；当前无条目，与远程池互斥扩展用 */
+export function levelUpTemplateMeleeWeaponOnly(_template: LevelUpCardTemplate): boolean {
+  return false;
+}
+
+/**
+ * 强化卡是否进入当前主武器对应的池：近战局剔除仅远程卡，射击局剔除仅近战卡（未来）；`base` 与 `sharedWeapon` 两类均进两池。
+ * @param category - `PLAYER_WEAPON_DEFS[kind].category === 'melee'` 时为 `'melee'`，否则为 `'ranged'`
+ */
+export function levelUpTemplateMatchesWeaponCategory(
+  template: LevelUpCardTemplate,
+  category: 'melee' | 'ranged',
+): boolean {
+  if (category === 'melee') {
+    return !levelUpTemplateRangedWeaponOnly(template);
+  }
+  return !levelUpTemplateMeleeWeaponOnly(template);
+}
+
+/**
+ * @deprecated 使用 `levelUpTemplateRangedWeaponOnly` 或 `levelUpTemplateMatchesWeaponCategory`
+ */
+export function levelUpTemplateRequiresProjectileWeapon(template: LevelUpCardTemplate): boolean {
+  return levelUpTemplateRangedWeaponOnly(template);
+}
+
+/** 图鉴与说明用短标签（与 `LevelUpCardDesignCategory` 一一对应） */
+export const LEVEL_UP_CARD_DESIGN_CATEGORY_LABELS: Record<LevelUpCardDesignCategory, string> = {
+  base: '基础能力',
+  sharedWeapon: '主武器（射击/近战共用）',
+  rangedWeapon: '远程专属',
+  meleeWeapon: '近战专属',
+};
+
+/** 由 `levelUpTemplateDesignCategory` 划分的子池（与 `levelUpCardTemplates` 合取无重复、并集为全表） */
+export const LEVEL_UP_CARD_POOL_BASE: readonly LevelUpCardTemplate[] = levelUpCardTemplates.filter(
+  (t) => levelUpTemplateDesignCategory(t) === 'base',
+);
+
+export const LEVEL_UP_CARD_POOL_SHARED_WEAPON: readonly LevelUpCardTemplate[] = levelUpCardTemplates.filter(
+  (t) => levelUpTemplateDesignCategory(t) === 'sharedWeapon',
+);
+
+export const LEVEL_UP_CARD_POOL_RANGED_WEAPON: readonly LevelUpCardTemplate[] = levelUpCardTemplates.filter(
+  (t) => levelUpTemplateDesignCategory(t) === 'rangedWeapon',
+);
+
+export const LEVEL_UP_CARD_POOL_MELEE_WEAPON: readonly LevelUpCardTemplate[] = levelUpCardTemplates.filter(
+  (t) => levelUpTemplateDesignCategory(t) === 'meleeWeapon',
+);
 
 /**
  * @deprecated 使用 `levelUpCardTemplates` + `materializeLevelUpCard`；保留别名避免外部误用旧静态数值
@@ -888,7 +938,7 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `步枪攻速 +${pctLabel(f)}（冷却缩短，Lv${lv}）`,
+        description: `主武器攻速 +${pctLabel(f)}（射击冷却与近战挥击间隔缩短，Lv${lv}）`,
         effect: { kind: 'rifleAttackSpeedMult', factor: f },
       };
     }
@@ -898,18 +948,8 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `步枪每轮多 ${add} 发弹丸（扇形，Lv${lv}）`,
+        description: `射击时每轮多 ${add} 发弹丸（扇形散射，Lv${lv}）`,
         effect: { kind: 'rifleBulletCount', add },
-      };
-    }
-    case 'critChanceAdd': {
-      const add = critAddFromSpec(template.scale, lv);
-      return {
-        id: template.id,
-        tier: template.tier,
-        title: template.title,
-        description: `暴击几率 +${Math.round(add * 100)}%（Lv${lv}）`,
-        effect: { kind: 'critChanceAdd', add },
       };
     }
     case 'critOnHitDamageMult': {
@@ -968,7 +1008,7 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `运气 +${pctLabel(f)}，提升掉率与暴击（Lv${lv}）`,
+        description: `运气 +${pctLabel(f)}，提升掉率；暴击率随运气增加（总和超过 100% 时溢出转为攻击力，Lv${lv}）`,
         effect: { kind: 'luckMult', factor: f },
       };
     }
@@ -1056,7 +1096,7 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `步枪子弹速度 +${pctLabel(f)}，子弹飞更快（Lv${lv}）`,
+        description: `子弹飞行速度 +${pctLabel(f)}（Lv${lv}）`,
         effect: { kind: 'rifleBulletSpeedMult', factor: f },
       };
     }
@@ -1097,18 +1137,8 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `步枪伤害 +${pctLabel(f)}，专属武器强化（Lv${lv}）`,
+        description: `主武器伤害乘区 +${pctLabel(f)}（与全局伤害乘区叠乘，Lv${lv}）`,
         effect: { kind: 'rifleDamageMult', factor: f },
-      };
-    }
-    case 'rifleCritChanceAdd': {
-      const add = critAddFromSpec(template.scale, lv);
-      return {
-        id: template.id,
-        tier: template.tier,
-        title: template.title,
-        description: `步枪暴击率 +${Math.round(add * 100)}%，专属暴击加成（Lv${lv}）`,
-        effect: { kind: 'rifleCritChanceAdd', add },
       };
     }
     case 'rifleReloadSpeedMult': {
@@ -1117,7 +1147,7 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `步枪换弹速度 +${pctLabel(f)}，换弹更快（Lv${lv}）`,
+        description: `换弹速度 +${pctLabel(f)}（Lv${lv}）`,
         effect: { kind: 'rifleReloadSpeedMult', factor: f },
       };
     }
@@ -1127,7 +1157,7 @@ export function materializeLevelUpCard(template: LevelUpCardTemplate, playerLeve
         id: template.id,
         tier: template.tier,
         title: template.title,
-        description: `冲刺移速 +${pctLabel(f)}，冲的更快更远（Lv${lv}）`,
+        description: `冲刺移速 +${pctLabel(f)}，冲得更快更远（Lv${lv}）`,
         effect: { kind: 'dashSpeedMult', factor: f },
       };
     }

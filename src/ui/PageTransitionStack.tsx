@@ -6,6 +6,7 @@ import { CodexPage } from './CodexPage';
 import { EquipmentPage } from './EquipmentPage';
 import { HomePage } from './HomePage';
 import { SettingsPage } from './SettingsPage';
+import { ShopPage } from './ShopPage';
 import { StatsPage } from './StatsPage';
 
 /** 与下方 CSS `page-fluid-in` 时长一致，用于动画结束后再卸底层旧页 */
@@ -32,7 +33,7 @@ function PageForPath({ path }: { path: string }): JSX.Element | null {
     case '/achievements':
       return <AchievementsPage />;
     case '/shop':
-      return <Navigate to="/equipment" replace />;
+      return <ShopPage />;
     case '/game':
       return <GameRoutePlaceholder />;
     default:

@@ -1,8 +1,8 @@
 /**
- * 装备等阶 E～SSS：每升一阶多 1 条词条；S 起可有套装（见 `gearSetConfig`）
+ * 装备等阶 E～SSS；A 起才有词条条数，条数与 roll 见 `gearAffixConfig`（词条等级 1～4）
  */
 
-/** 等阶序：E=1 词条 … SSS=8 词条 */
+/** 等阶序 */
 export const GEAR_GRADE_ORDER = ['E', 'D', 'C', 'B', 'A', 'S', 'SS', 'SSS'] as const;
 
 /** 装备等阶 id */
@@ -34,30 +34,24 @@ export function gearGradeIndex(g: GearGradeId): number {
   return GEAR_GRADE_ORDER.indexOf(g);
 }
 
-/** 该等阶总词条条数：E=1 … SSS=8 */
-export function totalAffixLinesForGrade(g: GearGradeId): number {
-  return gearGradeIndex(g) + 1;
-}
-
 /**
- * 稀有条数：A 及以下全走普通池；S 起掺稀有，总条数仍由 `totalAffixLinesForGrade` 约束
- * 依据：高阶装备语义更强，稀有池占位随 SS / SSS 略增
+ * 单件词条条数：E～B 无词条；A=1、S=2、SS=3、SSS=4（与 `pickUnifiedAffixRolls` 一致）
  */
-export function splitNormalRareAffixCounts(g: GearGradeId): { normal: number; rare: number } {
-  const total = totalAffixLinesForGrade(g);
+export function totalAffixLinesForGrade(g: GearGradeId): number {
   const i = gearGradeIndex(g);
-  let rare = 0;
-  if (i >= 7) {
-    rare = Math.min(3, total);
-  } else if (i === 6) {
-    rare = Math.min(2, total);
-  } else if (i === 5) {
-    rare = Math.min(2, total);
-  } else if (i === 4) {
-    rare = Math.min(1, total);
+  if (i <= 3) {
+    return 0;
   }
-  rare = Math.min(rare, total);
-  return { normal: total - rare, rare };
+  if (i === 4) {
+    return 1;
+  }
+  if (i === 5) {
+    return 2;
+  }
+  if (i === 6) {
+    return 3;
+  }
+  return 4;
 }
 
 /**
@@ -70,11 +64,11 @@ export function rollPurpleChestPieceCount(monsterLevel: number): number {
 }
 
 /**
- * 由怪物等级加权随机等阶；等级越高高阶权重略升
+ * 由怪物等级加权随机等阶；`bias` 随等级略抬分布（已较旧版减半上限），SSS 单独提高阈值，避免高等级怪 SSS 占比过高
  */
 export function rollGearGradeForDrop(monsterLevel: number): GearGradeId {
   const ml = Math.max(1, Math.floor(monsterLevel));
-  const bias = Math.min(42, ml * 2.1);
+  const bias = Math.min(18, ml * 0.85);
   const t = Math.random() * 100 + bias;
   if (t < 30) {
     return 'E';
@@ -94,7 +88,7 @@ export function rollGearGradeForDrop(monsterLevel: number): GearGradeId {
   if (t < 93) {
     return 'S';
   }
-  if (t < 97.5) {
+  if (t < 98.5) {
     return 'SS';
   }
   return 'SSS';

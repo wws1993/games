@@ -115,16 +115,17 @@ export class VirtualJoystick extends Container {
   private _drawBase(): void {
     const g = this._base;
     g.clear();
-    g.circle(0, 0, this._outerR).fill({ color: 0x1a1a1a, alpha: 0.55 });
-    g.circle(0, 0, this._outerR).stroke({ width: 3, color: 0xffffff, alpha: 0.32 });
-    g.circle(0, 0, this._outerR * 0.55).stroke({ width: 2, color: 0xffffff, alpha: 0.14 });
+    g.circle(0, 0, this._outerR).fill({ color: 0xfff5ee, alpha: 0.42 });
+    g.circle(0, 0, this._outerR).stroke({ width: 3, color: 0xffffff, alpha: 0.52 });
+    g.circle(0, 0, this._outerR).stroke({ width: 2, color: 0xe8a878, alpha: 0.45 });
+    g.circle(0, 0, this._outerR * 0.55).stroke({ width: 2, color: 0xffecd8, alpha: 0.32 });
   }
 
   private _drawKnob(lx: number, ly: number): void {
     const g = this._knob;
     g.clear();
-    g.circle(lx, ly, this._knobR).fill({ color: 0xffffff, alpha: 0.92 });
-    g.circle(lx, ly, this._knobR).stroke({ width: 2, color: 0x2a2a2a, alpha: 0.4 });
+    g.circle(lx, ly, this._knobR).fill({ color: 0xfffefb, alpha: 0.95 });
+    g.circle(lx, ly, this._knobR).stroke({ width: 2, color: 0xa85c40, alpha: 0.35 });
   }
 
   /** 在激活区内按下：锚点落在触点，浮现 `_stickRoot`，并开始跟手 */

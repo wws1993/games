@@ -139,6 +139,50 @@ export function resolveBulletObstacleBounce(
   return { x: cx, y: cy, vx: nvx, vy: nvy };
 }
 
+/** 圆弹与圆形敌人重叠时：将子弹推出敌圈外，并按从敌心指向弹心法向镜面反射速度；与障碍反弹共用「剩余次数」计数 */
+export function resolveBulletEnemyCircleBounce(
+  bx: number,
+  by: number,
+  bulletRadius: number,
+  vx: number,
+  vy: number,
+  ex: number,
+  ey: number,
+  enemyRadius: number,
+): { x: number; y: number; vx: number; vy: number } | null {
+  const dx = bx - ex;
+  const dy = by - ey;
+  const rr = enemyRadius + bulletRadius;
+  const d2 = dx * dx + dy * dy;
+  if (d2 > rr * rr + 1e-6) {
+    return null;
+  }
+  let nx: number;
+  let ny: number;
+  if (d2 < 1e-10) {
+    nx = 1;
+    ny = 0;
+  } else {
+    const d = Math.sqrt(d2);
+    nx = dx / d;
+    ny = dy / d;
+  }
+  const cx = ex + nx * (rr + 0.5);
+  const cy = ey + ny * (rr + 0.5);
+  const dot = vx * nx + vy * ny;
+  let nvx = vx;
+  let nvy = vy;
+  if (dot < 0) {
+    nvx -= 2 * dot * nx;
+    nvy -= 2 * dot * ny;
+  }
+  const spd = Math.hypot(vx, vy) || 1;
+  const nlen = Math.hypot(nvx, nvy) || 1;
+  nvx = (nvx / nlen) * spd;
+  nvy = (nvy / nlen) * spd;
+  return { x: cx, y: cy, vx: nvx, vy: nvy };
+}
+
 /** 玩家普通子弹（圆形）是否被障碍挡住；`ignoresObstacles` 为 true 时（如手榴弹）恒 false */
 export function playerBulletBlockedByObstacles(
   bx: number,

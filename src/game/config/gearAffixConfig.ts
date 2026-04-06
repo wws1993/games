@@ -1,5 +1,5 @@
 /**
- * 紫箱装备掉落：件数随怪等级 1～5；单件等阶 E～SSS 决定词条条数；词条自池随机；配置表见 `gearEquipmentCatalog`
+ * 紫箱装备掉落：件数随怪等级 1～5；等阶 E～B 无词条，A=1 / S=2 / SS=3 / SSS=4 条；属性与词条等级（T1～T4）随机；配置表见 `gearEquipmentCatalog`
  */
 
 import { pickRandomCatalogEntry } from './gearEquipmentCatalog';
@@ -8,7 +8,7 @@ import {
   GEAR_GRADE_VISUAL,
   rollGearGradeForDrop,
   rollPurpleChestPieceCount,
-  splitNormalRareAffixCounts,
+  totalAffixLinesForGrade,
 } from './gearGradeConfig';
 import { getGearSetDefById } from './gearSetConfig';
 import type { GearDropSlotId } from './gearSlotTypes';
@@ -89,6 +89,12 @@ export const GEAR_RARE_AFFIX_DEFS: readonly GearRareAffixDef[] = [
   { id: 'r_merit_find', labelTpl: '经验获取 +{0}', min: 0.04, max: 0.12, unitPercent: true, fractionDigits: 0 },
 ];
 
+/** 词条等级上限（与 `rollAffixTier` 一致） */
+const AFFIX_TIER_MAX = 4;
+
+/** 稀有词条 id 集合，用于拆分展示行 */
+const RARE_AFFIX_ID_SET: ReadonlySet<string> = new Set(GEAR_RARE_AFFIX_DEFS.map((d) => d.id));
+
 /** 生成仓库内唯一实例 id，供锁定与出售时稳定引用（与词条无关） */
 export function genPurpleGearInstanceId(): string {
   try {
@@ -158,6 +164,202 @@ function formatAffixLineFromRaw(d: GearNormalAffixDef | GearRareAffixDef, raw: n
   return d.labelTpl.replace(/\{0\}/g, v);
 }
 
+/** 词条 id → 配置，供装备页比对与格式化 */
+const GEAR_AFFIX_DEF_BY_ID: ReadonlyMap<string, GearNormalAffixDef | GearRareAffixDef> = (() => {
+  const m = new Map<string, GearNormalAffixDef | GearRareAffixDef>();
+  for (const d of GEAR_NORMAL_AFFIX_DEFS) {
+    m.set(d.id, d);
+  }
+  for (const d of GEAR_RARE_AFFIX_DEFS) {
+    m.set(d.id, d);
+  }
+  return m;
+})();
+
+/**
+ * 词条短名（表头用）：含 `{0}` 的模板取占位符前一段，否则为整句文案
+ * @param id - `affixStatTotals` 键
+ */
+export function getAffixIdShortLabel(id: string): string {
+  const d = GEAR_AFFIX_DEF_BY_ID.get(id);
+  if (!d) {
+    return id;
+  }
+  const t = d.labelTpl;
+  const i = t.indexOf('{0}');
+  if (i >= 0) {
+    return t.slice(0, i).replace(/\s+\+?\s*$/, '').trim();
+  }
+  return t;
+}
+
+/**
+ * 将单件词条合计格式化为与掉落行一致的展示串（含稀有无数值词条）
+ * @param id - `affixStatTotals` 键
+ * @param raw - 该 id 合计 roll 值
+ */
+export function formatAffixStatLineForDisplay(id: string, raw: number): string {
+  const d = GEAR_AFFIX_DEF_BY_ID.get(id);
+  if (!d) {
+    return `${id}: ${raw.toFixed(3)}`;
+  }
+  if (d.min === undefined || d.max === undefined) {
+    return raw < 0.5 ? '—' : d.labelTpl;
+  }
+  return formatAffixLineFromRaw(d, raw);
+}
+
+/**
+ * 合并两件装备的词条 id 并按配置表顺序排序，未知 id 按字典序排在末尾
+ * @param a - 第一件 `affixStatTotals`
+ * @param b - 第二件 `affixStatTotals`
+ */
+export function sortedAffixIdsFromTwoTotals(
+  a: Readonly<Record<string, number>>,
+  b: Readonly<Record<string, number>>,
+): string[] {
+  const ids = new Set<string>([...Object.keys(a), ...Object.keys(b)]);
+  const order = [...GEAR_NORMAL_AFFIX_DEFS.map((x) => x.id), ...GEAR_RARE_AFFIX_DEFS.map((x) => x.id)];
+  const out: string[] = [];
+  for (const id of order) {
+    if (ids.has(id)) {
+      out.push(id);
+      ids.delete(id);
+    }
+  }
+  for (const id of Array.from(ids).sort()) {
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * 装备比对「差」列：无数值区间的稀有词条用「获得/失去」，否则为数值差格式化
+ * @param id - 词条 id
+ * @param rawEq - 当前穿戴合计
+ * @param rawCand - 备选件合计
+ */
+export function formatAffixCompareDeltaLine(id: string, rawEq: number, rawCand: number): string {
+  const d = GEAR_AFFIX_DEF_BY_ID.get(id);
+  if (!d) {
+    const delta = rawCand - rawEq;
+    return Math.abs(delta) < 1e-9 ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
+  }
+  if (d.min === undefined || d.max === undefined) {
+    const before = rawEq >= 0.5;
+    const after = rawCand >= 0.5;
+    if (before === after) {
+      return '—';
+    }
+    return after ? '获得' : '失去';
+  }
+  const delta = rawCand - rawEq;
+  if (Math.abs(delta) < 1e-9) {
+    return '—';
+  }
+  if (d.unitPercent) {
+    return `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(d.fractionDigits ?? 0)}%`;
+  }
+  if (d.fractionDigits !== undefined) {
+    return `${delta >= 0 ? '+' : ''}${delta.toFixed(d.fractionDigits)}`;
+  }
+  return `${delta >= 0 ? '+' : ''}${Math.round(delta)}`;
+}
+
+/** 乘区词条：主值按 1+raw 两位小数展示（射速/伤害/移速/弹径），与「1.25」「.5↓」类读法一致 */
+const AFFIX_MULT_IDS_SHOW_AS_ONE_PLUS: ReadonlySet<string> = new Set([
+  'cd_pct',
+  'dmg_pct',
+  'move_pct',
+  'bullet_r_pct',
+]);
+
+/** 去掉多余尾零后，将 0.x 写成 `.x` 便于行内紧凑排版 */
+function compactPositiveDisplay(n: number, fractionDigits: number): string {
+  let s = n.toFixed(fractionDigits);
+  if (s.includes('.')) {
+    s = s.replace(/\.?0+$/, '');
+  }
+  if (s.startsWith('0.')) {
+    return s.slice(1);
+  }
+  return s;
+}
+
+/**
+ * 装备比对单行中间段：展示用原始合计（无标签）；乘区 id 为倍率 1+raw；详情浮层主列一般为「候选件」合计
+ * @param id - 词条 id
+ * @param raw - 该 id 的合计 roll（如候选件或已穿戴）
+ */
+export function formatAffixCompareCurrentValue(id: string, raw: number): string {
+  const d = GEAR_AFFIX_DEF_BY_ID.get(id);
+  if (!d) {
+    return Math.abs(raw) < 1e-9 ? '—' : Number.isInteger(raw) ? String(raw) : raw.toFixed(2);
+  }
+  if (d.min === undefined || d.max === undefined) {
+    return raw < 0.5 ? '—' : '✓';
+  }
+  if (AFFIX_MULT_IDS_SHOW_AS_ONE_PLUS.has(id)) {
+    return (1 + raw).toFixed(2);
+  }
+  if (d.unitPercent) {
+    return `${(raw * 100).toFixed(d.fractionDigits ?? 0)}%`;
+  }
+  if (d.fractionDigits !== undefined) {
+    return raw.toFixed(d.fractionDigits);
+  }
+  return String(Math.round(raw));
+}
+
+/**
+ * 装备比对行尾：相对当前穿戴的差值 + ↑/↓；无变化时返回空串（稀有开关类为「获↑」「失↓」）
+ * @param id - 词条 id
+ * @param rawEq - 当前穿戴合计
+ * @param rawCand - 查看中的仓库件合计
+ */
+export function formatAffixCompareDeltaArrowSuffix(id: string, rawEq: number, rawCand: number): string {
+  const d = GEAR_AFFIX_DEF_BY_ID.get(id);
+  if (!d) {
+    const delta = rawCand - rawEq;
+    if (Math.abs(delta) < 1e-9) {
+      return '';
+    }
+    return `${compactPositiveDisplay(Math.abs(delta), 2)}${delta > 0 ? '↑' : '↓'}`;
+  }
+  if (d.min === undefined || d.max === undefined) {
+    const before = rawEq >= 0.5;
+    const after = rawCand >= 0.5;
+    if (before === after) {
+      return '';
+    }
+    return after ? '获↑' : '失↓';
+  }
+  const delta = rawCand - rawEq;
+  if (Math.abs(delta) < 1e-9) {
+    return '';
+  }
+  const up = delta > 0;
+  const abs = Math.abs(delta);
+  if (AFFIX_MULT_IDS_SHOW_AS_ONE_PLUS.has(id)) {
+    return `${compactPositiveDisplay(abs, 2)}${up ? '↑' : '↓'}`;
+  }
+  if (d.unitPercent) {
+    const fd = d.fractionDigits ?? 0;
+    let mag = (abs * 100).toFixed(fd);
+    if (mag.includes('.')) {
+      mag = mag.replace(/\.?0+$/, '');
+    }
+    if (mag.startsWith('0.')) {
+      mag = mag.slice(1);
+    }
+    return `${mag}${up ? '↑' : '↓'}`;
+  }
+  if (d.fractionDigits !== undefined) {
+    return `${compactPositiveDisplay(abs, d.fractionDigits)}${up ? '↑' : '↓'}`;
+  }
+  return `${Math.round(abs)}${up ? '↑' : '↓'}`;
+}
+
 function mergeStatTotals(
   into: Record<string, number>,
   id: string,
@@ -166,62 +368,79 @@ function mergeStatTotals(
   into[id] = (into[id] ?? 0) + raw;
 }
 
-/** 随机普通词条：同步产出展示行与 `affixStatTotals` 增量 */
-function pickNormalAffixRolls(count: number): { lines: string[]; totals: Record<string, number> } {
-  const totals: Record<string, number> = {};
-  const pool = [...GEAR_NORMAL_AFFIX_DEFS];
-  const lines: string[] = [];
-  while (lines.length < count) {
-    shuffleInPlace(pool);
-    for (const def of pool) {
-      if (lines.length >= count) {
-        break;
-      }
-      const raw = def.min + Math.random() * (def.max - def.min);
-      mergeStatTotals(totals, def.id, raw);
-      lines.push(formatAffixLineFromRaw(def, raw));
-    }
-  }
-  return { lines, totals };
+/** 随机词条等级 T1～T4（数值落在该档对应 `min`～`max` 子区间内） */
+function rollAffixTier(): number {
+  return 1 + Math.floor(Math.random() * AFFIX_TIER_MAX);
 }
 
-/** 随机稀有词条：无 min/max 的仅文案，有区间的写入 `totals` */
-function pickRareAffixRolls(count: number): { lines: string[]; totals: Record<string, number> } {
-  const totals: Record<string, number> = {};
-  if (count <= 0) {
-    return { lines: [], totals };
+/**
+ * 按等级在 `def` 的区间内取子段并 uniform 抽样；无数值稀有词条写入等级作层数合计
+ */
+function rollRawInTierBand(def: GearNormalAffixDef | GearRareAffixDef, tier: number): number {
+  if (def.min === undefined || def.max === undefined) {
+    return tier;
   }
-  const pool = [...GEAR_RARE_AFFIX_DEFS];
-  shuffleInPlace(pool);
-  const pick = pool.slice(0, Math.min(count, pool.length));
-  const lines = pick.map((def) => {
-    if (def.min === undefined || def.max === undefined) {
-      return def.labelTpl;
+  const lo = def.min + (def.max - def.min) * ((tier - 1) / AFFIX_TIER_MAX);
+  const hi = def.min + (def.max - def.min) * (tier / AFFIX_TIER_MAX);
+  return lo + Math.random() * Math.max(1e-12, hi - lo);
+}
+
+/** 展示行末尾附词条等级，与 `rollAffixTier` 对应 */
+function formatAffixLineWithTier(def: GearNormalAffixDef | GearRareAffixDef, raw: number, tier: number): string {
+  const base =
+    def.min === undefined || def.max === undefined ? def.labelTpl : formatAffixLineFromRaw(def, raw);
+  return `${base} ·T${tier}`;
+}
+
+/**
+ * 从普通+稀有合并池无重复优先抽取 `count` 条词条，每条随机属性与 T1～T4；不足条数时允许重复 id
+ * @param count - `totalAffixLinesForGrade(等阶)`，E～B 为 0
+ */
+function pickUnifiedAffixRolls(count: number): {
+  normalLines: string[];
+  rareLines: string[];
+  totals: Record<string, number>;
+} {
+  const totals: Record<string, number> = {};
+  const normalLines: string[] = [];
+  const rareLines: string[] = [];
+  if (count <= 0) {
+    return { normalLines, rareLines, totals };
+  }
+  const allDefs = [...GEAR_NORMAL_AFFIX_DEFS, ...GEAR_RARE_AFFIX_DEFS];
+  shuffleInPlace(allDefs);
+  const picked: (GearNormalAffixDef | GearRareAffixDef)[] = [];
+  const seen = new Set<string>();
+  for (const def of allDefs) {
+    if (picked.length >= count) {
+      break;
     }
-    const raw = def.min + Math.random() * (def.max - def.min);
+    if (seen.has(def.id)) {
+      continue;
+    }
+    seen.add(def.id);
+    picked.push(def);
+  }
+  while (picked.length < count) {
+    picked.push(allDefs[Math.floor(Math.random() * allDefs.length)]!);
+  }
+  for (const def of picked) {
+    const tier = rollAffixTier();
+    const raw = rollRawInTierBand(def, tier);
     mergeStatTotals(totals, def.id, raw);
-    return formatAffixLineFromRaw(def, raw);
-  });
-  return { lines, totals };
+    const line = formatAffixLineWithTier(def, raw, tier);
+    if (RARE_AFFIX_ID_SET.has(def.id)) {
+      rareLines.push(line);
+    } else {
+      normalLines.push(line);
+    }
+  }
+  return { normalLines, rareLines, totals };
 }
 
 /** 按怪物等级随机部位（均匀） */
 function rollRandomSlotRow(): (typeof GEAR_DROP_SLOT_ORDER)[number] {
   return GEAR_DROP_SLOT_ORDER[Math.floor(Math.random() * GEAR_DROP_SLOT_ORDER.length)]!;
-}
-
-function mergeAffixTotals(
-  a: Record<string, number>,
-  b: Record<string, number>,
-): Record<string, number> {
-  const out: Record<string, number> = { ...a };
-  for (const k of Object.keys(b)) {
-    const v = b[k];
-    if (typeof v === 'number' && Number.isFinite(v)) {
-      out[k] = (out[k] ?? 0) + v;
-    }
-  }
-  return out;
 }
 
 /** 按怪物等级生成 1～5 件装备，等阶与词条见配置表 */
@@ -234,10 +453,9 @@ export function rollPurpleChestBundle(monsterLevel: number): PurpleChestBundle {
     const grade = rollGearGradeForDrop(ml);
     const entry = pickRandomCatalogEntry(row.id, grade);
     const vis = GEAR_GRADE_VISUAL[grade];
-    const { normal: nN, rare: nR } = splitNormalRareAffixCounts(grade);
-    const nRoll = pickNormalAffixRolls(nN);
-    const rRoll = pickRareAffixRolls(nR);
-    const affixStatTotals = mergeAffixTotals(nRoll.totals, rRoll.totals);
+    const affixCount = totalAffixLinesForGrade(grade);
+    const roll = pickUnifiedAffixRolls(affixCount);
+    const affixStatTotals = roll.totals;
     const setDef = entry.setId ? getGearSetDefById(entry.setId) : undefined;
     pieces.push({
       slotId: row.id,
@@ -251,8 +469,8 @@ export function rollPurpleChestBundle(monsterLevel: number): PurpleChestBundle {
       tierName: vis.tierName,
       displayFillColor: vis.fillColor,
       displayBgCss: vis.bgCss,
-      normalLines: nRoll.lines,
-      rareLines: rRoll.lines,
+      normalLines: roll.normalLines,
+      rareLines: roll.rareLines,
       affixStatTotals,
     });
   }

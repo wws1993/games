@@ -22,7 +22,12 @@ export type EnemyKind =
   | 'fighter_plane'
   | 'bomber_plane'
   | 'gunship'
-  | 'paratrooper';
+  | 'paratrooper'
+  /** 陆军扩展：摩托、宪兵、曲射迫击炮、轻坦 */
+  | 'motor_scout'
+  | 'military_police'
+  | 'mortar_team'
+  | 'light_tank';
 
 /**
  * 同种一批的站位策略：均在玩家周围环带内生成（见 `ENEMY_SPAWN_RING_*`），敌人仍朝玩家推进
@@ -33,7 +38,7 @@ export type EnemyKind =
  */
 export type EnemySpawnFormation = 'edge_random' | 'line_along_edge' | 'tight_cluster' | 'v_shape';
 
-/** 单兵种战斗数值（血量为 0 分钟基准，局内仍乘 `difficultyMultiplier`） */
+/** 单兵种战斗数值（血/攻为开局基准，生成时乘 `difficultyMultiplier(gameTime)` 随时间增长） */
 export interface EnemyStatConfig {
   /** 碰撞半径 */
   radius: number;
@@ -261,6 +266,42 @@ export const enemyGameConfig: EnemyGameConfig = {
       gemMultiplier: 1.02,
       ignoresObstacles: true,
     },
+    motor_scout: {
+      radius: 12,
+      baseHp: 30,
+      speed: 122,
+      contactDamage: 12,
+      gemMultiplier: 1.14,
+    },
+    military_police: {
+      radius: 11,
+      baseHp: 46,
+      speed: 70,
+      contactDamage: 14,
+      gemMultiplier: 1.18,
+    },
+    mortar_team: {
+      radius: 13,
+      baseHp: 68,
+      speed: 46,
+      contactDamage: 7,
+      gemMultiplier: 1.16,
+      ranged: {
+        type: 'shell',
+        damage: 13,
+        cooldownSec: 1.42,
+        attackRange: 500,
+        projSpeed: 158,
+        shellBlastRadius: 34,
+      },
+    },
+    light_tank: {
+      radius: 18,
+      baseHp: 300,
+      speed: 40,
+      contactDamage: 26,
+      gemMultiplier: 2.1,
+    },
   },
   spawnByKind: {
     infantry: {
@@ -365,6 +406,30 @@ export const enemyGameConfig: EnemyGameConfig = {
       batchSize: 1,
       formation: 'edge_random',
     },
+    motor_scout: {
+      unlockAfterSec: 105,
+      spawnWeight: 1.45,
+      batchSize: 2,
+      formation: 'tight_cluster',
+    },
+    military_police: {
+      unlockAfterSec: 135,
+      spawnWeight: 1.25,
+      batchSize: 2,
+      formation: 'edge_random',
+    },
+    mortar_team: {
+      unlockAfterSec: 285,
+      spawnWeight: 0.98,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
+    light_tank: {
+      unlockAfterSec: 380,
+      spawnWeight: 0.52,
+      batchSize: 1,
+      formation: 'edge_random',
+    },
   },
   curve: {
     rampSec: 300,
@@ -392,6 +457,10 @@ export const ENEMY_KIND_ORDER: readonly EnemyKind[] = [
   'bomber_plane',
   'officer',
   'artillery',
+  'motor_scout',
+  'military_police',
+  'mortar_team',
+  'light_tank',
 ];
 
 /**
