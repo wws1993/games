@@ -1,10 +1,15 @@
 import { createRoot } from 'react-dom/client';
+import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import './styles.css';
+import HomePage from './Pages/home';
 
-/** 应用根组件，展示 Hallo World。 */
-function App(): React.JSX.Element {
-  return <main className='flex min-h-screen items-center justify-center bg-zinc-100 text-5xl font-bold text-zinc-800'>Hallo World</main>;
-}
+/** 应用路由，仅注册游戏首页。 */
+const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <HomePage />,
+  },
+]);
 
 const appRoot = document.getElementById('app');
 
@@ -12,4 +17,4 @@ if (!appRoot) {
   throw new Error('Missing #app root element');
 }
 
-createRoot(appRoot).render(<App />);
+createRoot(appRoot).render(<RouterProvider router={router} />);

@@ -1,7 +1,7 @@
 {
   "name": "com.moretime2023.daledou",
   "displayName": "动物大乐斗",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "一起快乐地战斗爽",
   "main": "index.js",
   "scripts": {
@@ -16,23 +16,21 @@
   "dependencies": {
     "pixi.js": "^8.17.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.14.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
     "consola": "^3.2.3",
     "cordova-android": "^15.0.0",
     "cordova-browser": "^7.0.0",
     "cordova-common": "^5.0.0",
     "cordova-plugin-statusbar": "^4.0.0",
     "cordova-serve": "^4.0.1",
-    "postcss": "^8.4.49",
+    "sass": "^1.99.0",
     "shelljs": "^0.8.5",
-    "tailwindcss": "^4.0.0",
     "tsx": "4.19.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.0"
