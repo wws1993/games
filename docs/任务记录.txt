@@ -1,0 +1,6 @@
+bin 脚本
+- 修改包名（set-package）
+- 修改应用名称与描述（set-app-meta）
+- 修改版本号（set-version）
+- Push 提交（push）
+- 安装 Cordova 平台（install-cordova-platform）：交互选择 Web(browser) / Android / iOS / 全部，执行 cordova platform add；已存在则跳过；Windows 选 iOS 会二次确认
