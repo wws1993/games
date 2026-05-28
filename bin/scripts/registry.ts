@@ -3,6 +3,7 @@ import * as setPackage from './set-package';
 import * as setAppMeta from './set-app-meta';
 import * as setVersion from './set-version';
 import * as push from './push';
+import * as installCordovaPlatform from './install-cordova-platform';
 
 export interface ScriptItem {
   id: string;
@@ -15,5 +16,11 @@ export const scripts: ScriptItem[] = [
   { id: 'set-package', name: setPackage.name, description: setPackage.description, run: setPackage.run },
   { id: 'set-app-meta', name: setAppMeta.name, description: setAppMeta.description, run: setAppMeta.run },
   { id: 'set-version', name: setVersion.name, description: setVersion.description, run: setVersion.run },
+  {
+    id: 'install-cordova-platform',
+    name: installCordovaPlatform.name,
+    description: installCordovaPlatform.description,
+    run: installCordovaPlatform.run,
+  },
   { id: 'push', name: push.name, description: push.description, run: push.run },
 ];

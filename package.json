@@ -1,7 +1,7 @@
 {
   "name": "com.moretime2023.yishouban",
   "displayName": "易手办",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "企业与民生事务一站式咨询办理平台",
   "main": "index.js",
   "scripts": {
@@ -24,6 +24,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "consola": "^3.2.3",
+    "cordova-android": "^15.0.0",
     "cordova-browser": "^7.0.0",
     "cordova-common": "^5.0.0",
     "cordova-plugin-statusbar": "^4.0.0",
@@ -36,7 +37,8 @@
   },
   "cordova": {
     "platforms": [
-      "browser"
+      "browser",
+      "android"
     ],
     "plugins": {
       "cordova-plugin-statusbar": {}
