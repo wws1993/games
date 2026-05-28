@@ -24,7 +24,6 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "consola": "^3.2.3",
-    "cordova-android": "^15.0.0",
     "cordova-browser": "^7.0.0",
     "cordova-common": "^5.0.0",
     "cordova-plugin-statusbar": "^4.0.0",
@@ -37,8 +36,7 @@
   },
   "cordova": {
     "platforms": [
-      "browser",
-      "android"
+      "browser"
     ],
     "plugins": {
       "cordova-plugin-statusbar": {}
