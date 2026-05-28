@@ -1,0 +1,16 @@
+.title {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+
+.level1 {
+  font-size: var(--font-size-title);
+}
+
+.level2 {
+  font-size: var(--font-size-title-2);
+  letter-spacing: -0.02em;
+}

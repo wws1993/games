@@ -1,0 +1,74 @@
+.priceCard {
+  margin-bottom: var(--space-section);
+}
+
+.priceRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-inline);
+  margin-bottom: var(--space-inline);
+}
+
+.price {
+  font-size: 28px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  letter-spacing: -0.03em;
+}
+
+.priceNote {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}
+
+.section {
+  margin-bottom: var(--space-section);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-group);
+  font-size: var(--font-size-title-2);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.02em;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-group);
+  padding: 14px var(--space-page);
+  border-bottom: 1px solid var(--color-line);
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.stepNum {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 122, 255, 0.12);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.includes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: 1.8;
+}

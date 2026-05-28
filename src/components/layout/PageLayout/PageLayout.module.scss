@@ -1,0 +1,54 @@
+.page {
+  padding: var(--space-page);
+}
+
+.fill {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.withTabBar {
+  padding-bottom: calc(
+    var(--tab-bar-height) + var(--tab-bar-float-gap) * 2 + env(safe-area-inset-bottom, 0px) +
+      var(--space-page)
+  );
+}
+
+.fill.withTabBar {
+  padding-bottom: 0;
+}
+
+.fill.withTabBar .scroll {
+  padding-bottom: calc(
+    var(--tab-bar-height) + var(--tab-bar-float-gap) * 2 + env(safe-area-inset-bottom, 0px) +
+      var(--space-page)
+  );
+}
+
+.withFooter {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-tight);
+  margin-bottom: var(--space-section);
+}
+
+.fill .header {
+  flex-shrink: 0;
+  margin-bottom: var(--space-group);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}

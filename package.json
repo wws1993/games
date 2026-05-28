@@ -1,8 +1,8 @@
 {
-  "name": "com.moretime2023.daledou",
-  "displayName": "动物大乐斗",
-  "version": "3.2.1",
-  "description": "一起快乐地战斗爽",
+  "name": "com.moretime2023.yishouban",
+  "displayName": "易手办",
+  "version": "1.0.0",
+  "description": "企业与民生事务一站式咨询办理平台",
   "main": "index.js",
   "scripts": {
     "dev": "vite",

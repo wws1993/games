@@ -1,0 +1,112 @@
+.section {
+  margin-bottom: var(--space-section);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-group);
+  font-size: var(--font-size-title-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.couponCard {
+  display: flex;
+  margin-bottom: var(--space-group);
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.couponLeft {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  padding: 14px 10px;
+  background: linear-gradient(135deg, #4da3ff, var(--color-primary));
+  color: #fff;
+}
+
+.couponAmount {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.couponType {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.couponRight {
+  flex: 1;
+  padding: 14px;
+}
+
+.couponTitle {
+  margin: 0 0 4px;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.couponMeta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.useBtn {
+  margin-top: 8px;
+}
+
+.detailBtn {
+  margin-top: 12px;
+}
+
+.memberCard {
+  margin-bottom: var(--space-group);
+  border: 1px solid var(--glass-border);
+
+  &.recommended {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px rgba(0, 122, 255, 0.2);
+  }
+}
+
+.memberHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.memberName {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+}
+
+.memberPrice {
+  font-size: var(--font-size-body);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.benefits {
+  margin: 0;
+  padding-left: 16px;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}

@@ -1,0 +1,96 @@
+.block {
+  margin-bottom: var(--space-section);
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: var(--space-section);
+  padding-top: var(--space-section-lg);
+  padding-bottom: var(--space-section);
+  text-align: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent) 100%);
+  color: #fff;
+  font-size: 24px;
+  font-weight: var(--font-weight-semibold);
+  box-shadow: 0 6px 20px rgba(0, 122, 255, 0.3);
+}
+
+.name {
+  margin: 0 0 6px;
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+}
+
+.slogan {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-group);
+  font-size: var(--font-size-title-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.paragraph {
+  display: block;
+  margin: 0 0 10px;
+  line-height: 1.65;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.serviceList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: 1.8;
+}
+
+.contactList {
+  margin: 0 0 12px;
+}
+
+.contactItem {
+  margin-bottom: 10px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  dt {
+    margin-bottom: 2px;
+    font-size: var(--font-size-caption);
+    color: var(--color-text-tertiary);
+  }
+
+  dd {
+    margin: 0;
+    font-size: var(--font-size-body);
+    color: var(--color-text);
+  }
+}
+
+.version {
+  display: block;
+  text-align: center;
+}

@@ -1,0 +1,19 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px var(--space-page);
+  text-align: center;
+}
+
+.description {
+  margin: 0 0 var(--space-page);
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.action {
+  min-width: 120px;
+}

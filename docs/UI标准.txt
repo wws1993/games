@@ -1,0 +1,57 @@
+易手办 · UI 标准（iOS 毛玻璃 · 咨询业务）
+
+风格：20° 浅色渐变底 + 半透明磨砂层；留白多、圆角大；专业清爽，毛玻璃浮于背景之上。
+
+色彩（CSS 变量，见 src/styles/tokens.css）
+- 主色 primary：#007AFF（iOS 系统蓝）
+- 辅助 accent：#32ADE6
+- 成功 success：#34C759
+- 警示 danger：#FF3B30
+- 文字主色 text：#1C1C1E
+- 文字次色 text-secondary / tertiary
+- 页面底：全站统一 20° 浅色渐变（#dfe9f5 → #e8eef7 → #edf2f9，global.css）
+
+毛玻璃（glass）
+- 背景：--glass-bg / --glass-bg-elevated / --glass-bg-strong（半透明白）
+- 模糊：backdrop-filter blur(20～40px) saturate(180%)
+- 描边：--glass-border 高光边
+- 阴影：--glass-shadow + --glass-inset 内高光
+- 工具类：.glass / .glass-elevated（glass.css）
+
+字体
+- 系统栈：-apple-system, SF Pro, PingFang SC
+- 大标题：22px，letter-spacing 略紧
+- 正文：15px；说明：13px tertiary 色
+
+间距与圆角
+- 页面边距 16px（--space-page）；卡片圆角 16px；按钮 14px
+- 间距层级（tokens.css）：
+  · tight 6px — 标签与输入框
+  · inline 8px — 行内/紧凑排列
+  · block 12px — 组内关联项
+  · group 16px — 小标题与内容、表单字段间距
+  · section 24px — 模块/卡片之间（主次分界）
+  · section-lg 32px — 大区块/首屏留白
+- 排版原则：同组内容用 group 以内；不同模块用 section；页面标题区与内容区用 section
+- 底部 Tab：悬浮胶囊条，圆角 28px，距底 12px + safe-area
+
+组件约定
+- 主按钮：蓝色渐变 + 异形圆角（22px 22px 22px 8px）+ 多层投影
+- 次按钮 / 卡片 / 搜索栏：毛玻璃底 + 模糊
+- 列表项：嵌在玻璃卡片内，透明底 + 细分隔线
+- Toast：深色半透明胶囊 + 模糊
+- 底部操作 ActionBar：毛玻璃贴底固定，按钮一行等分排列（flex:1），多按钮时主操作放右侧
+
+导航
+- 底部悬浮 5 Tab（玻璃胶囊）
+- 首页顶区：Hero + 搜索栏固定在页面顶部（不随内容滚走）；下方内容独立滚动，滚动后顶区收缩为「品牌 LOGO + 标题 + 搜索」紧凑样式
+- Tab 页（服务/咨询/订单/我的）：MainLayout body overflow hidden；PageLayout fill 时标题固定、scroll 区独立滚动
+- 二级页顶栏：磨砂顶栏固定，内容区独立滚动（SubLayout scrollBody）；有 footer 时 ActionBar 固定贴底，内容区 withFooter 留白避让
+
+交互
+- 点击：scale(0.98) 或浅灰底，勿只用 opacity
+- 加载：骨架屏优先
+
+适配
+- max-width 480px；viewport-fit=cover + safe-area
+- 微信/Cordova WebView 需支持 backdrop-filter（iOS/新版 Android 均可）

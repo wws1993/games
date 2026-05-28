@@ -1,0 +1,118 @@
+.orderCard {
+  margin-bottom: var(--space-section);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  font-size: var(--font-size-body);
+}
+
+.rowLabel {
+  color: var(--color-text-secondary);
+}
+
+.amount {
+  font-size: 28px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+}
+
+.discount {
+  color: var(--color-success);
+}
+
+.couponSection {
+  margin-bottom: var(--space-section);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-group);
+  font-size: var(--font-size-title-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.couponList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-inline);
+}
+
+.couponItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-group);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: border-color 0.2s;
+
+  &.selected {
+    border-color: var(--color-primary);
+    background: rgba(0, 122, 255, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.couponValue {
+  flex-shrink: 0;
+  min-width: 56px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.couponInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.couponTitle {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.couponMeta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.wechatPay {
+  margin-bottom: var(--space-section);
+  padding: var(--space-section);
+  text-align: center;
+  background: #07c160;
+  border-radius: var(--radius-card);
+  color: #fff;
+}
+
+.wechatIcon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto var(--space-inline);
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+  color: #07c160;
+}
+
+.wechatLabel {
+  margin: 0 0 var(--space-tight);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+}

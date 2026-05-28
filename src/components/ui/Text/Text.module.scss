@@ -1,0 +1,19 @@
+.text {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.body {
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+}
+
+.secondary {
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+}
+
+.caption {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}

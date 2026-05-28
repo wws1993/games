@@ -1,0 +1,26 @@
+.bar {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 45;
+  width: 100%;
+  max-width: var(--app-max-width);
+  padding: 10px var(--space-page) calc(10px + env(safe-area-inset-bottom, 0px));
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  border-top: 1px solid var(--glass-border-subtle);
+  box-shadow: 0 -4px 24px rgba(31, 38, 80, 0.08);
+  transform: translateX(-50%);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  & > * {
+    flex: 1;
+    min-width: 0;
+  }
+}

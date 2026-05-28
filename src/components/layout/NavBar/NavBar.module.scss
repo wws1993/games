@@ -1,0 +1,49 @@
+.navBar {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  height: calc(var(--nav-bar-height) + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: 4px;
+  padding-right: var(--space-page);
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--glass-border-subtle);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-left: 12px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s;
+
+  &:active {
+    transform: scale(0.94);
+    background: rgba(0, 0, 0, 0.08);
+  }
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  padding-right: 40px;
+  font-size: var(--font-size-title-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  text-align: center;
+  line-height: var(--nav-bar-height);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

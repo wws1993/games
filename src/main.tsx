@@ -1,15 +1,10 @@
 import { createRoot } from 'react-dom/client';
-import { RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { RouterProvider } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { OrderProvider } from './context/OrderContext';
+import { ToastApiBridge, ToastProvider } from './components/ui';
+import { router } from './router';
 import './styles.css';
-import HomePage from './Pages/home';
-
-/** 应用路由，仅注册游戏首页。 */
-const router = createBrowserRouter([
-  {
-    path: '/',
-    element: <HomePage />,
-  },
-]);
 
 const appRoot = document.getElementById('app');
 
@@ -17,4 +12,13 @@ if (!appRoot) {
   throw new Error('Missing #app root element');
 }
 
-createRoot(appRoot).render(<RouterProvider router={router} />);
+createRoot(appRoot).render(
+  <ToastProvider>
+    <AuthProvider>
+      <OrderProvider>
+        <ToastApiBridge />
+        <RouterProvider router={router} />
+      </OrderProvider>
+    </AuthProvider>
+  </ToastProvider>,
+);

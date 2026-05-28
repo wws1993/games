@@ -1,0 +1,65 @@
+.card {
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: transform 0.2s;
+
+  &:active {
+    transform: scale(0.99);
+  }
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.name {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.status {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pending_payment {
+  background: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
+}
+
+.in_progress,
+.pending_service {
+  background: rgba(0, 122, 255, 0.12);
+  color: var(--color-primary);
+}
+
+.completed {
+  background: rgba(52, 199, 89, 0.15);
+  color: var(--color-success);
+}
+
+.cancelled {
+  background: rgba(142, 142, 147, 0.15);
+  color: var(--color-text-tertiary);
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}
+
+.amount {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}

@@ -1,36 +1,4 @@
-html,
-body,
-#app {
-  width: 100%;
-  min-height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  background: #f6f0e4;
-  color: #231815;
-  font-family:
-    'Noto Serif SC',
-    'PingFang SC',
-    'Microsoft YaHei',
-    sans-serif;
-  -webkit-text-size-adjust: 100%;
-  -webkit-tap-highlight-color: transparent;
-}
-
-#app {
-  min-height: 100vh;
-  min-height: 100dvh;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
+@import './styles/tokens.css';
+@import './styles/glass.css';
+@import './styles/spacing.css';
+@import './styles/global.css';

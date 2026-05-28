@@ -1,0 +1,70 @@
+:root {
+  /* 色彩 — 偏 iOS 系统蓝 */
+  --color-primary: #007aff;
+  --color-primary-dark: #0062cc;
+  --color-accent: #32ade6;
+  --color-success: #34c759;
+  --color-danger: #ff3b30;
+  --color-text: #1c1c1e;
+  --color-text-secondary: #3c3c43;
+  --color-text-tertiary: #8e8e93;
+  --color-line: rgba(60, 60, 67, 0.12);
+  --color-bg-page: #e8eef7;
+  --color-surface: #ffffff;
+
+  /* 毛玻璃 */
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.78);
+  --glass-bg-strong: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.72);
+  --glass-border-subtle: rgba(255, 255, 255, 0.45);
+  --glass-blur: 20px;
+  --glass-blur-heavy: 40px;
+  --glass-saturate: 180%;
+  --glass-shadow: 0 8px 32px rgba(31, 38, 80, 0.1);
+  --glass-shadow-sm: 0 2px 16px rgba(0, 0, 0, 0.06);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+
+  /* 字号 */
+  --font-size-title: 22px;
+  --font-size-title-2: 17px;
+  --font-size-body: 15px;
+  --font-size-caption: 13px;
+  --font-weight-semibold: 600;
+  --font-weight-regular: 400;
+
+  /* 间距层级：tight → inline → block → group → section → section-lg */
+  --space-tight: 6px;
+  --space-inline: 8px;
+  --space-block: 12px;
+  --space-group: 16px;
+  --space-section: 24px;
+  --space-section-lg: 32px;
+  --space-page: 16px;
+  --space-card: 16px;
+
+  /* 圆角 — iOS 偏大圆角 */
+  --radius-card: 16px;
+  --radius-button: 14px;
+  --radius-search: 12px;
+  --radius-pill: 999px;
+  --radius-tab-bar: 28px;
+
+  /* 布局 */
+  --app-max-width: 480px;
+  --nav-bar-height: 44px;
+  --tab-bar-height: 56px;
+  --tab-bar-float-gap: 12px;
+
+  /* 阴影 */
+  --shadow-card: var(--glass-shadow-sm);
+  --shadow-button: 0 4px 16px rgba(0, 122, 255, 0.28);
+
+  /* 层级 */
+  --z-modal: 1000;
+  --z-toast: 1100;
+
+  /* 字体栈 */
+  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue',
+    sans-serif;
+}

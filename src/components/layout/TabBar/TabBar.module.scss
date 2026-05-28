@@ -1,0 +1,60 @@
+.tabBarWrap {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  z-index: 100;
+  width: 100%;
+  max-width: var(--app-max-width);
+  padding: 0 var(--space-page) calc(var(--tab-bar-float-gap) + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.tabBar {
+  display: flex;
+  height: var(--tab-bar-height);
+  padding: 4px 6px;
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-tab-bar);
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  pointer-events: auto;
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 2px;
+  border-radius: 20px;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.2s ease, background 0.2s ease;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.active {
+  color: var(--color-primary);
+  background: rgba(0, 122, 255, 0.12);
+}
+
+.icon {
+  width: 24px;
+  height: 24px;
+}
+
+.label {
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}

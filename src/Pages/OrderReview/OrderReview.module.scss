@@ -1,0 +1,48 @@
+.summary {
+  margin-bottom: var(--space-section);
+}
+
+.ratingSection {
+  margin-bottom: var(--space-section);
+}
+
+.stars {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-inline);
+}
+
+.star {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  font-size: 32px;
+  color: var(--color-line);
+  cursor: pointer;
+  transition: transform 0.15s;
+
+  &.on {
+    color: #ff9500;
+  }
+
+  &:active {
+    transform: scale(1.1);
+  }
+}
+
+.textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--space-group);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-button);
+  background: rgba(255, 255, 255, 0.5);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+
+  &:focus {
+    border-color: var(--color-primary);
+  }
+}

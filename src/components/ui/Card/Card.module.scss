@@ -1,0 +1,26 @@
+.card {
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow-sm), var(--glass-inset);
+}
+
+.clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.15s;
+
+  &:active {
+    transform: scale(0.98);
+    opacity: 0.92;
+  }
+}
+
+.padding {
+  padding: var(--space-card);
+}
+
+.noPadding {
+  padding: 0;
+}

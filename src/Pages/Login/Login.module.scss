@@ -1,0 +1,81 @@
+.page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-page);
+}
+
+.card {
+  width: 100%;
+  max-width: 360px;
+  padding: 28px var(--space-card);
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+}
+
+.title {
+  margin: 0 0 var(--space-tight);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+  letter-spacing: -0.03em;
+}
+
+.sub {
+  display: block;
+  margin-bottom: var(--space-section);
+  text-align: center;
+
+  strong {
+    color: var(--color-primary);
+    font-weight: 600;
+  }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-tight);
+}
+
+.label {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-button);
+  background: rgba(255, 255, 255, 0.5);
+  font-size: var(--font-size-body);
+  outline: none;
+
+  &:focus {
+    border-color: var(--color-primary);
+  }
+}
+
+.back {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-section);
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
